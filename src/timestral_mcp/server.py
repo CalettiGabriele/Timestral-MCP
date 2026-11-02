@@ -22,6 +22,8 @@ from pydantic import Field
 
 from timestral_mcp import models
 from timestral_mcp.analytics import backtest as bt
+from timestral_mcp.analytics.calendar import FEATURES as CALENDAR_FEATURES
+from timestral_mcp.analytics.calendar import add_calendar_features as build_calendar
 from timestral_mcp.analytics.covariates import future_block
 from timestral_mcp.analytics.decision import quantity_for_service_level as service_quantity
 from timestral_mcp.analytics.decision import threshold_probability as threshold_prob
@@ -61,7 +63,7 @@ Per un totale mensile completo controlla `partial_periods` in get_forecast_detai
 Se un modello non è ancora scaricato, forecast/backtest lo segnalano: chiedi conferma all'utente prima di ripetere \
 con allow_download=true (il download può richiedere minuti).
 
-Altri strumenti: threshold_probability e quantity_for_service_level per soglie e scorte. backtest può durare: se il client supporta i Task MCP gira in background, altrimenti entro un tempo massimo. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
+Altri strumenti: add_calendar_features per festività e calendario commerciale come covariate note; threshold_probability e quantity_for_service_level per soglie e scorte. backtest può durare: se il client supporta i Task MCP gira in background, altrimenti entro un tempo massimo. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
 """
 
 
@@ -363,6 +365,47 @@ async def backtest(
 
 
 # --------------------------------------------------------------------------- decisioni
+
+
+@mcp.tool(annotations={"readOnlyHint": False})
+@user_errors
+async def add_calendar_features(
+    dataset_id: str,
+    country: Annotated[
+        str, Field(description="Codice paese ISO per le festività (IT, DE, FR, ES, GB, US...).")
+    ] = "IT",
+    subdiv: Annotated[
+        str | None, Field(description="Regione/provincia/stato per festività locali (es. 'MI' per Milano).")
+    ] = None,
+    features: Annotated[
+        list[str] | None,
+        Field(description=f"Quali colonne creare (default tutte): {', '.join(CALENDAR_FEATURES)}."),
+    ] = None,
+    extend_future_periods: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=3660,
+            description="Righe future da aggiungere dopo l'ultima riga, con le colonne di calendario (per usarle come covariate note).",
+        ),
+    ] = 0,
+) -> dict:
+    """Crea un nuovo dataset con covariate di calendario (festività, ponti, Black Friday, periodo natalizio, Pasqua), anche per il futuro. Solo dati giornalieri o più frequenti."""
+    ds = datasets.get(dataset_id)
+    new_id = datasets.new_id()
+    new_ds, info = await anyio.to_thread.run_sync(
+        partial(
+            build_calendar,
+            ds,
+            new_id=new_id,
+            country=country,
+            subdiv=subdiv,
+            features=features,
+            extend_future_periods=extend_future_periods,
+        )
+    )
+    datasets.put(new_id, new_ds)
+    return info
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
