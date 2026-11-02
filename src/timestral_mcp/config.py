@@ -30,6 +30,8 @@ class Settings:
     model_horizon_block: int = 1_024
     max_datasets: int = 20
     max_forecasts: int = 100
+    max_batches: int = 20
+    max_anomaly_windows: int = 60
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -47,6 +49,7 @@ class Settings:
             export_dir=export_dir,
             skills_dir=Path(skills).expanduser() if skills else None,
             max_rows=int(os.environ.get("TIMESTRAL_MAX_ROWS", cls.max_rows)),
+            max_anomaly_windows=int(os.environ.get("TIMESTRAL_MAX_ANOMALY_WINDOWS", cls.max_anomaly_windows)),
         )
 
 

@@ -21,6 +21,7 @@ from fastmcp_tasks import TasksExtension
 from pydantic import BaseModel, Field
 
 from timestral_mcp import models
+from timestral_mcp.analytics import anomalies as an
 from timestral_mcp.analytics import backtest as bt
 from timestral_mcp.analytics import scenarios as sc
 from timestral_mcp.analytics.calendar import FEATURES as CALENDAR_FEATURES
@@ -35,12 +36,14 @@ from timestral_mcp.config import MODEL_SIZES, MODEL_WEIGHTS_MB
 from timestral_mcp.data.ingest import Dataset, build_dataset, read_source, trailing_future_rows
 from timestral_mcp.progress import Reporter
 from timestral_mcp.session import (
+    anomaly_runs,
     backtests,
     datasets,
     forecasts,
     settings,
 )
 from timestral_mcp.ui.charts import (
+    anomalies_app,
     backtest_app,
     forecast_app,
     forecast_png,
@@ -65,7 +68,7 @@ Per un totale mensile completo controlla `partial_periods` in get_forecast_detai
 Se un modello non è ancora scaricato, forecast/backtest lo segnalano: chiedi conferma all'utente prima di ripetere \
 con allow_download=true (il download può richiedere minuti).
 
-Altri strumenti: add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if (es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte. backtest può durare: se il client supporta i Task MCP gira in background, altrimenti entro un tempo massimo. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
+Altri strumenti: add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if (es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte; detect_anomalies per picchi, crolli e possibili rotture di stock. backtest e detect_anomalies possono durare: se il client supporta i Task MCP girano in background, altrimenti entro un tempo massimo e dichiarano cosa non hanno eseguito. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
 """
 
 
@@ -219,6 +222,10 @@ async def list_session_items() -> dict:
         "backtests": [
             {"id": k, "target": v.target, "series": v.series, "horizon": v.horizon}
             for k, v in backtests.items()
+        ],
+        "anomaly_runs": [
+            {"id": k, "target": v.target, "series": v.series, "anomalies": len(v.anomalies)}
+            for k, v in anomaly_runs.items()
         ],
     }
 
@@ -506,6 +513,59 @@ async def quantity_for_service_level(
 ) -> dict:
     """Quantità necessaria per coprire una data quota di casi (es. scorte): per periodo e totale sulla finestra (lead time), con intervallo cautelativo/indipendente."""
     return service_quantity(forecasts.get(forecast_id), service_level, start, end)
+
+
+@mcp.tool(app=True, task=True, annotations={"readOnlyHint": False})
+@user_errors
+async def detect_anomalies(
+    dataset_id: str,
+    target: str,
+    series: str | None = None,
+    model: ModelSize | None = None,
+    interval: Annotated[
+        float, Field(gt=0, lt=1, description="Intervallo atteso: fuori da questo è anomalia (default 0.98).")
+    ] = 0.98,
+    lookback: Annotated[
+        int | None, Field(ge=1, description="Quanti periodi recenti analizzare (default 365).")
+    ] = None,
+    block: Annotated[
+        int | None,
+        Field(ge=2, description="Periodi per finestra di previsione (default: ciclo stagionale, almeno 14)."),
+    ] = None,
+    past_covariates: list[str] | None = None,
+    known_covariates: Annotated[
+        list[str] | None,
+        Field(description="Covariate che spiegano i picchi (es. promo): così non risultano anomalie."),
+    ] = None,
+    allow_download: DownloadFlag = False,
+    ctx: Context | None = None,
+    progress: Progress = Progress(),
+) -> ToolResult:
+    """Trova valori reali fuori dall'intervallo atteso (picchi, crolli, possibili rotture di stock), confrontandoli con previsioni fatte solo sui dati precedenti."""
+    ds = datasets.get(dataset_id)
+    size = models.normalize_size(model)
+    models.ensure_available(size, allow_download)
+    plan = an.plan_anomalies(
+        ds,
+        target=target,
+        series=series,
+        model=size,
+        interval=interval,
+        lookback=lookback,
+        block=block,
+        past_covariates=past_covariates,
+        known_covariates=known_covariates,
+    )
+    parts = []
+    reporter = Reporter(progress, ctx)
+    for i, origin in enumerate(plan.origins):
+        await reporter.update(i, len(plan.origins), f"Finestra {i + 1}/{len(plan.origins)}")
+        parts.append(await anyio.to_thread.run_sync(an.run_window, plan, origin))
+    await reporter.update(len(plan.origins), len(plan.origins), "Completato")
+    run_id = anomaly_runs.new_id()
+    result = an.finish_anomalies(plan, parts, run_id)
+    anomaly_runs.put(run_id, result)
+    return ToolResult(content=an.anomaly_summary(result), structured_content=anomalies_app(result))
 
 
 # --------------------------------------------------------------------------- esportazione

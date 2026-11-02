@@ -6,12 +6,12 @@ import pytest
 from fastmcp import Client
 from fastmcp_tasks.client import call_tool_task
 
-from timestral_mcp.server import backtests, datasets, forecasts, mcp
+from timestral_mcp.server import anomaly_runs, backtests, datasets, forecasts, mcp
 
 
 @pytest.fixture(autouse=True)
 def _clean(fake):
-    for store in (datasets, forecasts, backtests):
+    for store in (datasets, forecasts, backtests, anomaly_runs):
         store.clear()
 
 
@@ -43,9 +43,17 @@ async def load(c, **kw):
 
 TOOLS = {
     "backtest": lambda ds: {"dataset_id": ds, "target": "qty", "horizon": 14, "series": "A"},
+    "detect_anomalies": lambda ds: {
+        "dataset_id": ds,
+        "target": "qty",
+        "series": "A",
+        "lookback": 60,
+        "block": 14,
+    },
 }
 MARKERS = {
     "backtest": "MASE",
+    "detect_anomalies": "Anomalie an_",
 }
 
 

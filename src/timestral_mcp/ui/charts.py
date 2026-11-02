@@ -21,6 +21,7 @@ from prefab_ui.components import (
 )
 from prefab_ui.components.charts import ChartSeries, LineChart
 
+from timestral_mcp.analytics.anomalies import AnomalyResult
 from timestral_mcp.analytics.backtest import BacktestResult
 from timestral_mcp.analytics.forecast import ForecastResult
 from timestral_mcp.analytics.scenarios import BASE, ScenarioResult
@@ -268,6 +269,73 @@ def scenario_app(sr: ScenarioResult) -> PrefabApp:
             rows=comp,
         )
     return PrefabApp(title=f"Scenari {sr.target}", view=view)
+
+
+def anomalies_app(a: AnomalyResult, max_points: int = 400) -> PrefabApp:
+    pts = a.points.iloc[-max_points:]
+    rows = [
+        {
+            "date": _date(ts, a.freq),
+            "reale": _val(r["actual"]),
+            "atteso": _val(r["median"]),
+            "basso": _val(r["lower"]),
+            "alto": _val(r["upper"]),
+        }
+        for ts, r in pts.iterrows()
+    ]
+    table = [
+        {
+            "data": r["date"],
+            "reale": r["actual"],
+            "atteso": r["expected_median"],
+            "intervallo": f"{fmt(r['expected_range'][0])} – {fmt(r['expected_range'][1])}",
+            "direzione": r["direction"],
+            "gravita": r["score"],
+            "note": "; ".join(r["notes"]) or "-",
+        }
+        for r in a.anomalies
+    ]
+    total = int(a.points["anomaly"].sum())
+    with Column(gap=4, css_class="p-4") as view:
+        Heading(f"Anomalie in {a.target}")
+        Text(
+            f"Timestral-{a.model} · serie '{a.series}' · intervallo {a.interval:.0%} · {len(a.points)} periodi analizzati",
+            css_class="text-sm text-muted-foreground",
+        )
+        _warnings(a.warnings)
+        with Row(gap=3, css_class="flex-wrap"):
+            Metric(label="Anomalie trovate", value=total)
+            Metric(label="Attese per puro caso", value=a.expected_by_chance)
+        LineChart(
+            data=rows,
+            series=[
+                ChartSeries(data_key="reale", label="Reale", color=C_HISTORY),
+                ChartSeries(data_key="atteso", label="Atteso (mediana)", color=C_MEDIAN),
+                ChartSeries(data_key="basso", label="Limite basso", color=C_BOUND),
+                ChartSeries(data_key="alto", label="Limite alto", color=C_BOUND),
+            ],
+            x_axis="date",
+            height=340,
+            show_dots=False,
+            animate=False,
+        )
+        if table:
+            DataTable(
+                columns=[
+                    DataTableColumn(key="data", header="Data", sortable=True),
+                    DataTableColumn(key="reale", header="Reale", sortable=True),
+                    DataTableColumn(key="atteso", header="Atteso", sortable=True),
+                    DataTableColumn(key="intervallo", header="Intervallo"),
+                    DataTableColumn(key="direzione", header="Direzione"),
+                    DataTableColumn(key="gravita", header="Gravità", sortable=True),
+                    DataTableColumn(key="note", header="Note"),
+                ],
+                rows=table,
+                search=True,
+                paginated=True,
+                page_size=10,
+            )
+    return PrefabApp(title=f"Anomalie {a.target}", view=view)
 
 
 def forecast_png(r: ForecastResult, history_points: int = HISTORY_POINTS) -> bytes:
