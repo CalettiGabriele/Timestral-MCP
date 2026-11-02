@@ -19,8 +19,9 @@ from prefab_ui.components import (
     Tabs,
     Text,
 )
-from prefab_ui.components.charts import ChartSeries, LineChart
+from prefab_ui.components.charts import BarChart, ChartSeries, LineChart
 
+from timestral_mcp.analytics import batch as batchmod
 from timestral_mcp.analytics.anomalies import AnomalyResult
 from timestral_mcp.analytics.backtest import BacktestResult
 from timestral_mcp.analytics.forecast import ForecastResult
@@ -195,6 +196,92 @@ def backtest_app(b: BacktestResult) -> PrefabApp:
 
 
 SCENARIO_COLORS = ["#2563eb", "#16a34a", "#9333ea", "#dc2626", "#0891b2", "#ca8a04"]
+
+
+def batch_app(b: batchmod.BatchResult, sort_by: batchmod.SortBy = "volume") -> PrefabApp:
+    t = batchmod.totals(b)
+    rows = batchmod.sorted_rows(b.rows, sort_by)
+    table = [
+        {
+            "serie": r["series"],
+            "prima": r["previous_total"],
+            "previsto": r["forecast_total"],
+            "var": r["change_pct"],
+            "incertezza": r["uncertainty_pct"],
+            "segnalazioni": ", ".join(r["flags"]) or "-",
+            **({"affidabilita": r.get("reliability") or "n/d"} if b.with_backtest else {}),
+        }
+        for r in rows
+    ]
+    top = sorted(b.rows, key=lambda r: -r["forecast_total"])[:10]
+    bars = [
+        {"serie": r["series"], "prima": r["previous_total"] or 0, "previsto": r["forecast_total"]}
+        for r in top
+    ]
+    att = batchmod.attention(b)
+    cols = [
+        DataTableColumn(key="serie", header="Serie", sortable=True),
+        DataTableColumn(key="prima", header=f"Ultimi {b.horizon}", sortable=True),
+        DataTableColumn(key="previsto", header="Previsto", sortable=True),
+        DataTableColumn(key="var", header="Var. %", sortable=True),
+        DataTableColumn(key="incertezza", header=f"Incertezza % ({b.interval:.0%})", sortable=True),
+        DataTableColumn(key="segnalazioni", header="Segnalazioni"),
+    ]
+    if b.with_backtest:
+        cols.append(DataTableColumn(key="affidabilita", header="Affidabilità", sortable=True))
+    with Column(gap=4, css_class="p-4") as view:
+        Heading(f"Previsione di {b.target} su {t['series_forecasted']} serie")
+        Text(
+            f"Timestral-{b.model} · {b.horizon} periodi · intervallo {b.interval:.0%} · id {b.id}",
+            css_class="text-sm text-muted-foreground",
+        )
+        _warnings(b.warnings)
+        with Row(gap=3, css_class="flex-wrap"):
+            Metric(label="Totale previsto", value=fmt(t["forecast_total"]))
+            if t["change_pct_comparable"] is not None:
+                Metric(
+                    label=f"Rispetto agli ultimi {b.horizon} periodi",
+                    value=f"{t['change_pct_comparable']:+.1f}%",
+                    description=f"su {t['comparable_series']} serie confrontabili",
+                )
+            Metric(
+                label="Serie saltate",
+                value=len(b.skipped),
+                description=f"{len(b.not_run)} non eseguite per limiti",
+            )
+        with Tabs(value="tabella", variant="line"):
+            with Tab("Tabella", value="tabella"):
+                DataTable(columns=cols, rows=table, search=True, paginated=True, page_size=15)
+            with Tab("Prime 10", value="prime"):
+                BarChart(
+                    data=bars,
+                    series=[
+                        ChartSeries(data_key="prima", label=f"Ultimi {b.horizon} periodi", color=C_BOUND),
+                        ChartSeries(data_key="previsto", label="Previsto", color=C_MEDIAN),
+                    ],
+                    x_axis="serie",
+                    height=340,
+                    animate=False,
+                )
+            with Tab("Attenzione", value="attenzione"):
+                for title, key in (
+                    ("Maggiori cali", "biggest_drops"),
+                    ("Maggiori crescite", "biggest_rises"),
+                    ("Serie grandi più incerte", "most_uncertain_large_series"),
+                    ("Dati da controllare", "data_quality_flags"),
+                ):
+                    if att[key]:
+                        Heading(title, css_class="text-base")
+                        for x in att[key]:
+                            ch = "n/d" if x["change_pct"] is None else f"{x['change_pct']:+.0f}%"
+                            Text(
+                                f"{x['series']}: {fmt(x['previous_total'])} → {fmt(x['forecast_total'])} ({ch})"
+                            )
+                if b.skipped:
+                    Heading("Saltate", css_class="text-base")
+                    for k, v in list(b.skipped.items())[:15]:
+                        Text(f"{k}: {v}", css_class="text-sm text-muted-foreground")
+    return PrefabApp(title=f"Previsione {b.target}", view=view)
 
 
 def scenario_app(sr: ScenarioResult) -> PrefabApp:

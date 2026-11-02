@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import anyio
+import pandas as pd
 from fastmcp import Context, FastMCP
 from fastmcp.dependencies import Progress
 from fastmcp.exceptions import ToolError
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 from timestral_mcp import models
 from timestral_mcp.analytics import anomalies as an
 from timestral_mcp.analytics import backtest as bt
+from timestral_mcp.analytics import batch as bm
 from timestral_mcp.analytics import scenarios as sc
 from timestral_mcp.analytics.calendar import FEATURES as CALENDAR_FEATURES
 from timestral_mcp.analytics.calendar import add_calendar_features as build_calendar
@@ -34,17 +36,20 @@ from timestral_mcp.analytics.profile import profile_dataset as build_profile
 from timestral_mcp.analytics.summary import backtest_summary, forecast_details, forecast_summary
 from timestral_mcp.config import MODEL_SIZES, MODEL_WEIGHTS_MB
 from timestral_mcp.data.ingest import Dataset, build_dataset, read_source, trailing_future_rows
-from timestral_mcp.progress import Reporter
+from timestral_mcp.progress import Reporter, effective_seconds
 from timestral_mcp.session import (
     anomaly_runs,
     backtests,
+    batches,
     datasets,
     forecasts,
+    resolve_forecast,
     settings,
 )
 from timestral_mcp.ui.charts import (
     anomalies_app,
     backtest_app,
+    batch_app,
     forecast_app,
     forecast_png,
     scenario_app,
@@ -68,7 +73,7 @@ Per un totale mensile completo controlla `partial_periods` in get_forecast_detai
 Se un modello non è ancora scaricato, forecast/backtest lo segnalano: chiedi conferma all'utente prima di ripetere \
 con allow_download=true (il download può richiedere minuti).
 
-Altri strumenti: add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if (es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte; detect_anomalies per picchi, crolli e possibili rotture di stock. backtest e detect_anomalies possono durare: se il client supporta i Task MCP girano in background, altrimenti entro un tempo massimo e dichiarano cosa non hanno eseguito. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
+Altri strumenti: forecast_many per molti prodotti/negozi insieme (poi batch_series_forecast per una serie); add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if (es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte; detect_anomalies per picchi, crolli e possibili rotture di stock. backtest, forecast_many e detect_anomalies possono durare: se il client supporta i Task MCP girano in background, altrimenti entro un tempo massimo e dichiarano cosa non hanno eseguito. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
 """
 
 
@@ -223,6 +228,10 @@ async def list_session_items() -> dict:
             {"id": k, "target": v.target, "series": v.series, "horizon": v.horizon}
             for k, v in backtests.items()
         ],
+        "batches": [
+            {"id": k, "target": v.target, "series": len(v.results), "horizon": v.horizon}
+            for k, v in batches.items()
+        ],
         "anomaly_runs": [
             {"id": k, "target": v.target, "series": v.series, "anomalies": len(v.anomalies)}
             for k, v in anomaly_runs.items()
@@ -310,7 +319,7 @@ async def get_forecast_details(
     how: Annotated[Literal["sum", "mean"], Field(description="Somma o media nell'aggregazione.")] = "sum",
 ) -> dict:
     """Valori numerici di una previsione per un periodo, con quantili a scelta e totali aggregati (approssimati per gli intervalli)."""
-    r = forecasts.get(forecast_id)
+    r = resolve_forecast(forecast_id)
     return forecast_details(r, start=start, end=end, quantiles=quantiles, aggregate=aggregate, how=how)
 
 
@@ -318,7 +327,7 @@ async def get_forecast_details(
 @user_errors
 async def forecast_chart_image(forecast_id: str) -> Image:
     """Grafico PNG della previsione con bande di incertezza (per client senza interfacce interattive)."""
-    r = forecasts.get(forecast_id)
+    r = resolve_forecast(forecast_id)
     data = await anyio.to_thread.run_sync(forecast_png, r)
     return Image(data=data, format="png")
 
@@ -373,7 +382,7 @@ async def backtest(
     return ToolResult(content=backtest_summary(result), structured_content=backtest_app(result))
 
 
-# --------------------------------------------------------------------------- tipi condivisi
+# --------------------------------------------------------------------------- più serie
 
 
 ModelSize = Literal["5M", "28M", "123M", "209M"]
@@ -383,6 +392,109 @@ DownloadFlag = Annotated[
         description="Consenti il download dei pesi del modello se non è ancora sul disco. Usare solo dopo la conferma dell'utente."
     ),
 ]
+
+
+@mcp.tool(app=True, task=True, annotations={"readOnlyHint": False})
+@user_errors
+async def forecast_many(
+    dataset_id: str,
+    target: Annotated[str, Field(description="Colonna numerica da prevedere, per ogni serie.")],
+    horizon: Annotated[int, Field(ge=1, description="Periodi futuri da prevedere.")],
+    series: Annotated[
+        list[str] | None, Field(description="Serie da prevedere (default: tutte, fino al limite).")
+    ] = None,
+    model: ModelSize | None = None,
+    interval: Annotated[float, Field(gt=0, lt=1)] = 0.8,
+    past_covariates: list[str] | None = None,
+    known_covariates: Annotated[
+        list[str] | None,
+        Field(description="Covariate note in anticipo: ogni serie deve avere righe future con i valori."),
+    ] = None,
+    with_backtest: Annotated[
+        bool,
+        Field(
+            description="Calcola anche l'affidabilità di ogni serie con un backtest (fino a 30 serie, più lento)."
+        ),
+    ] = False,
+    sort_by: Annotated[
+        Literal["volume", "change", "uncertainty"], Field(description="Ordine della tabella riassuntiva.")
+    ] = "volume",
+    max_seconds: Annotated[
+        int | None,
+        Field(
+            ge=10,
+            le=3600,
+            description="Tempo massimo di calcolo; le serie non eseguite sono elencate. Default: 90 s, oppure 900 s se gira come Task in background.",
+        ),
+    ] = None,
+    allow_download: DownloadFlag = False,
+    ctx: Context | None = None,
+    progress: Progress = Progress(),
+) -> ToolResult:
+    """Prevede molte serie insieme (prodotti, negozi...): tabella riassuntiva con variazione, incertezza e segnalazioni, classifiche di attenzione e totale."""
+    ds = datasets.get(dataset_id)
+    size = models.normalize_size(model)
+    models.ensure_available(size, allow_download)
+    batch_id = batches.new_id()
+    result = await anyio.to_thread.run_sync(
+        partial(
+            bm.run_batch,
+            ds,
+            batch_id=batch_id,
+            target=target,
+            horizon=horizon,
+            series=series,
+            model=size,
+            interval=interval,
+            past_covariates=past_covariates,
+            known_covariates=known_covariates,
+            with_backtest=with_backtest,
+            max_series=settings.max_batch_series,
+            max_seconds=effective_seconds(max_seconds),
+            progress=Reporter(progress, ctx).from_thread(),
+        )
+    )
+    batches.put(batch_id, result)
+    return ToolResult(
+        content=bm.batch_summary(result, sort_by), structured_content=batch_app(result, sort_by)
+    )
+
+
+@mcp.tool(app=True, annotations={"readOnlyHint": True})
+@user_errors
+async def batch_series_forecast(
+    batch_id: str, series: Annotated[str, Field(description="Nome della serie del batch.")]
+) -> ToolResult:
+    """Grafico interattivo e numeri di una singola serie di una previsione su più serie."""
+    r = resolve_forecast(bm.forecast_key(batch_id, series))
+    return ToolResult(content=forecast_summary(r), structured_content=forecast_app(r))
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+@user_errors
+async def export_batch(
+    batch_id: str,
+    format: Annotated[
+        Literal["csv", "xlsx"], Field(description="xlsx: un file con due fogli; csv: due file.")
+    ] = "xlsx",
+) -> dict:
+    """Salva la tabella riassuntiva e le previsioni (mediana e 21 quantili) di tutte le serie del batch."""
+    b = batches.get(batch_id)
+    out_dir = settings.export_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary, long = bm.batch_frames(b)
+    if format == "xlsx":
+        path = out_dir / f"{b.id}.xlsx"
+        with pd.ExcelWriter(path) as xl:
+            summary.to_excel(xl, sheet_name="riepilogo", index=False)
+            long.to_excel(xl, sheet_name="previsioni", index=False)
+        files = [str(path)]
+    else:
+        a, c = out_dir / f"{b.id}_riepilogo.csv", out_dir / f"{b.id}_previsioni.csv"
+        summary.to_csv(a, index=False)
+        long.to_csv(c, index=False)
+        files = [str(a), str(c)]
+    return {"files": files, "series": len(summary), "forecast_rows": len(long)}
 
 
 # --------------------------------------------------------------------------- decisioni
@@ -498,7 +610,7 @@ async def threshold_probability(
     end: str | None = None,
 ) -> dict:
     """Probabilità di essere sotto/sopra una soglia in ciascun periodo, interpolata tra i quantili (con limiti espliciti nelle code)."""
-    return threshold_prob(forecasts.get(forecast_id), threshold, direction, start, end)
+    return threshold_prob(resolve_forecast(forecast_id), threshold, direction, start, end)
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -512,7 +624,7 @@ async def quantity_for_service_level(
     end: str | None = None,
 ) -> dict:
     """Quantità necessaria per coprire una data quota di casi (es. scorte): per periodo e totale sulla finestra (lead time), con intervallo cautelativo/indipendente."""
-    return service_quantity(forecasts.get(forecast_id), service_level, start, end)
+    return service_quantity(resolve_forecast(forecast_id), service_level, start, end)
 
 
 @mcp.tool(app=True, task=True, annotations={"readOnlyHint": False})
@@ -581,7 +693,7 @@ async def export_results(
     ] = None,
 ) -> dict:
     """Salva mediana e tutti i 21 quantili della previsione in un file nella cartella di esportazione."""
-    r = forecasts.get(forecast_id)
+    r = resolve_forecast(forecast_id)
     out_dir = settings.export_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     base = Path(filename or r.id).name
@@ -635,7 +747,7 @@ def dataset_resource(dataset_id: str) -> str:
 @mcp.resource("forecast://{forecast_id}")
 def forecast_resource(forecast_id: str) -> str:
     """Riassunto testuale di una previsione."""
-    return forecast_summary(forecasts.get(forecast_id))
+    return forecast_summary(resolve_forecast(forecast_id))
 
 
 @mcp.prompt

@@ -31,6 +31,7 @@ class Settings:
     max_datasets: int = 20
     max_forecasts: int = 100
     max_batches: int = 20
+    max_batch_series: int = 100
     max_anomaly_windows: int = 60
 
     @classmethod
@@ -49,6 +50,7 @@ class Settings:
             export_dir=export_dir,
             skills_dir=Path(skills).expanduser() if skills else None,
             max_rows=int(os.environ.get("TIMESTRAL_MAX_ROWS", cls.max_rows)),
+            max_batch_series=int(os.environ.get("TIMESTRAL_MAX_BATCH_SERIES", cls.max_batch_series)),
             max_anomaly_windows=int(os.environ.get("TIMESTRAL_MAX_ANOMALY_WINDOWS", cls.max_anomaly_windows)),
         )
 

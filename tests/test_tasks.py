@@ -1,17 +1,22 @@
 """Task MCP: i tool lunghi girano in background con i client moderni e in modo sincrono con quelli legacy."""
 
+import asyncio
+
 import numpy as np
 import pandas as pd
 import pytest
 from fastmcp import Client
 from fastmcp_tasks.client import call_tool_task
 
-from timestral_mcp.server import anomaly_runs, backtests, datasets, forecasts, mcp
+from tests.helpers import MarkerAwareFake
+from timestral_mcp import models
+from timestral_mcp import server as srv
+from timestral_mcp.server import anomaly_runs, backtests, batches, datasets, forecasts, mcp
 
 
 @pytest.fixture(autouse=True)
 def _clean(fake):
-    for store in (datasets, forecasts, backtests, anomaly_runs):
+    for store in (datasets, forecasts, backtests, batches, anomaly_runs):
         store.clear()
 
 
@@ -42,6 +47,7 @@ async def load(c, **kw):
 
 
 TOOLS = {
+    "forecast_many": lambda ds: {"dataset_id": ds, "target": "qty", "horizon": 14},
     "backtest": lambda ds: {"dataset_id": ds, "target": "qty", "horizon": 14, "series": "A"},
     "detect_anomalies": lambda ds: {
         "dataset_id": ds,
@@ -52,6 +58,7 @@ TOOLS = {
     },
 }
 MARKERS = {
+    "forecast_many": "Previsione su più serie",
     "backtest": "MASE",
     "detect_anomalies": "Anomalie an_",
 }
@@ -76,6 +83,48 @@ async def test_legacy_clients_get_the_same_result_synchronously(tool):
         assert MARKERS[tool] in res.content[0].text and "$prefab" in res.structured_content
         with pytest.raises(Exception, match="did not run as a task"):
             await call_tool_task(c, tool, TOOLS[tool](ds))
+
+
+async def test_time_budget_default_depends_on_execution_mode(monkeypatch):
+    seen = []
+    original = srv.bm.run_batch
+
+    def spy(*a, **kw):
+        seen.append(kw["max_seconds"])
+        return original(*a, **kw)
+
+    monkeypatch.setattr(srv.bm, "run_batch", spy)
+    args = lambda ds: {"dataset_id": ds, "target": "qty", "horizon": 7}  # noqa: E731
+    async with Client(mcp, mode="legacy") as c:
+        await c.call_tool("forecast_many", args((await load(c))["dataset_id"]))
+    async with Client(mcp) as c:
+        task = await call_tool_task(c, "forecast_many", args((await load(c))["dataset_id"]))
+        await task.result()
+        explicit = await call_tool_task(
+            c, "forecast_many", {**args((await load(c))["dataset_id"]), "max_seconds": 30}
+        )
+        await explicit.result()
+    assert seen == [90.0, 900.0, 30.0]
+
+
+async def test_task_progress_is_observable_while_running():
+    slow = MarkerAwareFake(delay=0.05)
+    models.set_factory(lambda s: slow)
+    async with Client(mcp) as c:
+        ds = (await load(c))["dataset_id"]
+        task = await call_tool_task(c, "forecast_many", {"dataset_id": ds, "target": "qty", "horizon": 7})
+        messages = set()
+        for _ in range(200):
+            st = await task.status()
+            if getattr(st, "status_message", None):
+                messages.add(st.status_message)
+            if st.status in {"completed", "failed", "cancelled"}:
+                break
+            await asyncio.sleep(0.02)
+        result = await task.result()
+        assert any(m.startswith("Serie ") for m in messages), messages
+        assert "Serie previste: 3" in result.content[0].text
+        assert slow.calls == 3
 
 
 # ---------------------------------------------------------------------------- covariate_importance via tool
