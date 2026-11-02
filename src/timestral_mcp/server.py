@@ -21,18 +21,22 @@ from pydantic import Field
 from timestral_mcp import models
 from timestral_mcp.analytics import backtest as bt
 from timestral_mcp.analytics.covariates import future_block
-from timestral_mcp.analytics.forecast import ForecastResult, run_forecast
+from timestral_mcp.analytics.forecast import run_forecast
 from timestral_mcp.analytics.profile import profile_dataset as build_profile
 from timestral_mcp.analytics.summary import backtest_summary, forecast_details, forecast_summary
-from timestral_mcp.config import MODEL_SIZES, MODEL_WEIGHTS_MB, get_settings
+from timestral_mcp.config import MODEL_SIZES, MODEL_WEIGHTS_MB
 from timestral_mcp.data.ingest import Dataset, build_dataset, read_source, trailing_future_rows
-from timestral_mcp.data.store import Store
-from timestral_mcp.ui.charts import backtest_app, forecast_app, forecast_png
-
-settings = get_settings()
-datasets: Store[Dataset] = Store("ds", settings.max_datasets)
-forecasts: Store[ForecastResult] = Store("fc", settings.max_forecasts)
-backtests: Store[bt.BacktestResult] = Store("bt", settings.max_forecasts)
+from timestral_mcp.session import (
+    backtests,
+    datasets,
+    forecasts,
+    settings,
+)
+from timestral_mcp.ui.charts import (
+    backtest_app,
+    forecast_app,
+    forecast_png,
+)
 
 INSTRUCTIONS = """\
 Server per previsioni probabilistiche di serie temporali con il modello Timestral di Mistral.
