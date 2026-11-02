@@ -25,6 +25,7 @@ from timestral_mcp.analytics import batch as batchmod
 from timestral_mcp.analytics.anomalies import AnomalyResult
 from timestral_mcp.analytics.backtest import BacktestResult
 from timestral_mcp.analytics.forecast import ForecastResult
+from timestral_mcp.analytics.importance import ImportanceResult
 from timestral_mcp.analytics.scenarios import BASE, ScenarioResult
 from timestral_mcp.analytics.summary import _date, _pct, fmt, known_covariate_lines
 
@@ -423,6 +424,63 @@ def anomalies_app(a: AnomalyResult, max_points: int = 400) -> PrefabApp:
                 page_size=10,
             )
     return PrefabApp(title=f"Anomalie {a.target}", view=view)
+
+
+def importance_app(r: ImportanceResult) -> PrefabApp:
+    g = r.gain_vs_none_pct["wql"]
+    bars = [{"covariata": row["covariate"], "delta": row["delta_wql_pct"] or 0.0} for row in r.rows]
+    table = [
+        {
+            "covariata": row["covariate"],
+            "ruolo": row["role"],
+            "delta_wql": row["delta_wql_pct"],
+            "delta_mase": row["delta_mase_pct"],
+            "finestre": row["folds_worse_without"],
+            "giudizio": row["verdict"],
+        }
+        for row in r.rows
+    ]
+    with Column(gap=4, css_class="p-4") as view:
+        Heading(f"Importanza delle covariate per {r.target}")
+        Text(
+            f"Timestral-{r.model} · serie '{r.series}' · {r.folds} finestre da {r.horizon} periodi · id {r.id}",
+            css_class="text-sm text-muted-foreground",
+        )
+        _warnings(r.warnings)
+        with Row(gap=3, css_class="flex-wrap"):
+            Metric(label="Errore (WQL) con tutte le covariate", value=fmt(r.all_covariates["wql"], 3))
+            Metric(label="Errore (WQL) senza covariate", value=fmt(r.no_covariates["wql"], 3))
+            if g is not None:
+                Metric(
+                    label="Senza covariate l'errore",
+                    value=f"{g:+.1f}%",
+                    trend="up" if g >= 0 else "down",
+                    trend_sentiment="negative" if g >= 0 else "positive",
+                )
+        Text(
+            "Quanto peggiora la previsione sul passato se si toglie una covariata (positivo = covariata utile, "
+            "negativo = rumore). Misura l'utilità per prevedere, non la causalità.",
+            css_class="text-sm text-muted-foreground",
+        )
+        BarChart(
+            data=bars,
+            series=[ChartSeries(data_key="delta", label="Peggioramento % se tolta (WQL)", color=C_MEDIAN)],
+            x_axis="covariata",
+            height=320,
+            animate=False,
+        )
+        DataTable(
+            columns=[
+                DataTableColumn(key="covariata", header="Covariata"),
+                DataTableColumn(key="ruolo", header="Ruolo"),
+                DataTableColumn(key="delta_wql", header="Δ WQL %", sortable=True),
+                DataTableColumn(key="delta_mase", header="Δ MASE %", sortable=True),
+                DataTableColumn(key="finestre", header="Finestre peggiori senza"),
+                DataTableColumn(key="giudizio", header="Giudizio"),
+            ],
+            rows=table,
+        )
+    return PrefabApp(title=f"Importanza covariate {r.target}", view=view)
 
 
 def forecast_png(r: ForecastResult, history_points: int = HISTORY_POINTS) -> bytes:

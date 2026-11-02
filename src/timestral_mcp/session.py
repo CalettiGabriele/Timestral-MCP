@@ -5,6 +5,7 @@ from __future__ import annotations
 from timestral_mcp.analytics import anomalies as an
 from timestral_mcp.analytics import backtest as bt
 from timestral_mcp.analytics import batch as bm
+from timestral_mcp.analytics import importance as im
 from timestral_mcp.analytics.forecast import ForecastResult
 from timestral_mcp.config import get_settings
 from timestral_mcp.data.ingest import Dataset
@@ -16,6 +17,7 @@ forecasts: Store[ForecastResult] = Store("fc", settings.max_forecasts)
 backtests: Store[bt.BacktestResult] = Store("bt", settings.max_forecasts)
 batches: Store[bm.BatchResult] = Store("bm", settings.max_batches)
 anomaly_runs: Store[an.AnomalyResult] = Store("an", settings.max_batches)
+importance_runs: Store[im.ImportanceResult] = Store("im", settings.max_batches)
 
 
 def resolve_forecast(forecast_id: str) -> ForecastResult:

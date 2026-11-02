@@ -25,6 +25,7 @@ from timestral_mcp import models
 from timestral_mcp.analytics import anomalies as an
 from timestral_mcp.analytics import backtest as bt
 from timestral_mcp.analytics import batch as bm
+from timestral_mcp.analytics import importance as im
 from timestral_mcp.analytics import scenarios as sc
 from timestral_mcp.analytics.calendar import FEATURES as CALENDAR_FEATURES
 from timestral_mcp.analytics.calendar import add_calendar_features as build_calendar
@@ -43,6 +44,7 @@ from timestral_mcp.session import (
     batches,
     datasets,
     forecasts,
+    importance_runs,
     resolve_forecast,
     settings,
 )
@@ -52,6 +54,7 @@ from timestral_mcp.ui.charts import (
     batch_app,
     forecast_app,
     forecast_png,
+    importance_app,
     scenario_app,
 )
 
@@ -73,7 +76,7 @@ Per un totale mensile completo controlla `partial_periods` in get_forecast_detai
 Se un modello non è ancora scaricato, forecast/backtest lo segnalano: chiedi conferma all'utente prima di ripetere \
 con allow_download=true (il download può richiedere minuti).
 
-Altri strumenti: forecast_many per molti prodotti/negozi insieme (poi batch_series_forecast per una serie); add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if (es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte; detect_anomalies per picchi, crolli e possibili rotture di stock. backtest, forecast_many e detect_anomalies possono durare: se il client supporta i Task MCP girano in background, altrimenti entro un tempo massimo e dichiarano cosa non hanno eseguito. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
+Altri strumenti: forecast_many per molti prodotti/negozi insieme (poi batch_series_forecast per una serie); add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if (es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte; detect_anomalies per picchi, crolli e possibili rotture di stock; covariate_importance per capire quali covariate aiutano davvero (ablation). backtest, forecast_many, detect_anomalies e covariate_importance possono durare: se il client supporta i Task MCP girano in background, altrimenti entro un tempo massimo e dichiarano cosa non hanno eseguito. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
 """
 
 
@@ -231,6 +234,10 @@ async def list_session_items() -> dict:
         "batches": [
             {"id": k, "target": v.target, "series": len(v.results), "horizon": v.horizon}
             for k, v in batches.items()
+        ],
+        "importance_runs": [
+            {"id": k, "target": v.target, "series": v.series, "covariates": len(v.rows)}
+            for k, v in importance_runs.items()
         ],
         "anomaly_runs": [
             {"id": k, "target": v.target, "series": v.series, "anomalies": len(v.anomalies)}
@@ -678,6 +685,73 @@ async def detect_anomalies(
     result = an.finish_anomalies(plan, parts, run_id)
     anomaly_runs.put(run_id, result)
     return ToolResult(content=an.anomaly_summary(result), structured_content=anomalies_app(result))
+
+
+@mcp.tool(app=True, task=True, annotations={"readOnlyHint": False})
+@user_errors
+async def covariate_importance(
+    dataset_id: str,
+    target: str,
+    horizon: Annotated[int, Field(ge=1, description="Periodi previsti in ogni finestra di test.")],
+    series: str | None = None,
+    model: ModelSize | None = None,
+    known_covariates: Annotated[
+        list[str] | None,
+        Field(
+            description="Covariate note in anticipo da valutare. Se né queste né le passate sono indicate, le sceglie il server."
+        ),
+    ] = None,
+    past_covariates: Annotated[
+        list[str] | None, Field(description="Covariate note solo nel passato da valutare.")
+    ] = None,
+    n_folds: Annotated[
+        int,
+        Field(
+            ge=2,
+            le=8,
+            description="Finestre di test (default 4): più finestre, risultato più affidabile ma più lento.",
+        ),
+    ] = 4,
+    interval: Annotated[float, Field(gt=0, lt=1)] = 0.8,
+    max_seconds: Annotated[
+        int | None,
+        Field(
+            ge=10,
+            le=3600,
+            description="Tempo massimo. Default: 90 s, oppure 900 s se gira come Task in background.",
+        ),
+    ] = None,
+    allow_download: DownloadFlag = False,
+    ctx: Context | None = None,
+    progress: Progress = Progress(),
+) -> ToolResult:
+    """Importanza delle covariate per ablation: quanto peggiora la previsione sul passato (backtest) se si toglie ciascuna covariata. Misura l'utilità predittiva, non la causalità."""
+    ds = datasets.get(dataset_id)
+    size = models.normalize_size(model)
+    models.ensure_available(size, allow_download)
+    plan = im.plan_importance(
+        ds,
+        target=target,
+        horizon=horizon,
+        series=series,
+        model=size,
+        n_folds=n_folds,
+        interval=interval,
+        known_covariates=known_covariates,
+        past_covariates=past_covariates,
+    )
+    run_id = importance_runs.new_id()
+    result = await anyio.to_thread.run_sync(
+        partial(
+            im.run_importance,
+            plan,
+            run_id,
+            max_seconds=effective_seconds(max_seconds),
+            progress=Reporter(progress, ctx).from_thread(),
+        )
+    )
+    importance_runs.put(run_id, result)
+    return ToolResult(content=im.importance_summary(result), structured_content=importance_app(result))
 
 
 # --------------------------------------------------------------------------- esportazione
