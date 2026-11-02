@@ -7,7 +7,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "fastmcp[apps]>=4",
+    "fastmcp[apps,tasks]>=4",
     "matplotlib>=3.11.2",
     "numpy>=2.5.4",
     "openpyxl>=3.1.5",

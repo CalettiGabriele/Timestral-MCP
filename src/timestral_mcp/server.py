@@ -12,10 +12,12 @@ from typing import Annotated, Literal
 
 import anyio
 from fastmcp import Context, FastMCP
+from fastmcp.dependencies import Progress
 from fastmcp.exceptions import ToolError
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Image
+from fastmcp_tasks import TasksExtension
 from pydantic import Field
 
 from timestral_mcp import models
@@ -26,6 +28,7 @@ from timestral_mcp.analytics.profile import profile_dataset as build_profile
 from timestral_mcp.analytics.summary import backtest_summary, forecast_details, forecast_summary
 from timestral_mcp.config import MODEL_SIZES, MODEL_WEIGHTS_MB
 from timestral_mcp.data.ingest import Dataset, build_dataset, read_source, trailing_future_rows
+from timestral_mcp.progress import Reporter
 from timestral_mcp.session import (
     backtests,
     datasets,
@@ -55,6 +58,8 @@ nel testo della previsione ("Valori futuri usati dal modello"): non assumerli. \
 Per un totale mensile completo controlla `partial_periods` in get_forecast_details ed estendi l'orizzonte se serve. \
 Se un modello non è ancora scaricato, forecast/backtest lo segnalano: chiedi conferma all'utente prima di ripetere \
 con allow_download=true (il download può richiedere minuti).
+
+backtest può durare: se il client supporta i Task MCP gira in background, altrimenti entro un tempo massimo.
 """
 
 
@@ -74,6 +79,7 @@ async def lifespan(_server: FastMCP):
 
 
 mcp = FastMCP("Timestral", instructions=INSTRUCTIONS, lifespan=lifespan)
+mcp.add_extension(TasksExtension())  # i tool con task=True girano in background se il client lo supporta
 
 _skills_root = settings.skills_dir or Path(__file__).resolve().parents[2] / "skills"
 _skill_roots = [p for p in (_skills_root / "core", _skills_root / "verticals" / "sales") if p.is_dir()]
@@ -304,7 +310,7 @@ async def forecast_chart_image(forecast_id: str) -> Image:
     return Image(data=data, format="png")
 
 
-@mcp.tool(app=True, annotations={"readOnlyHint": False})
+@mcp.tool(app=True, task=True, annotations={"readOnlyHint": False})
 @user_errors
 async def backtest(
     dataset_id: str,
@@ -325,6 +331,7 @@ async def backtest(
         ),
     ] = False,
     ctx: Context | None = None,
+    progress: Progress = Progress(),
 ) -> ToolResult:
     """Valida il modello sul passato: prevede le ultime finestre usando solo i dati precedenti e confronta con i valori reali e con una baseline stagionale."""
     ds = datasets.get(dataset_id)
@@ -342,12 +349,11 @@ async def backtest(
     )
     folds = []
     total = len(plan.origins)
+    reporter = Reporter(progress, ctx)
     for i, origin in enumerate(plan.origins):
-        if ctx:
-            await ctx.report_progress(i, total, f"Finestra di test {i + 1}/{total}")
+        await reporter.update(i, total, f"Finestra di test {i + 1}/{total}")
         folds.append(await anyio.to_thread.run_sync(bt.run_fold, plan, origin))
-    if ctx:
-        await ctx.report_progress(total, total, "Completato")
+    await reporter.update(total, total, "Completato")
     bt_id = backtests.new_id()
     result = bt.finish_backtest(plan, folds, bt_id)
     backtests.put(bt_id, result)
