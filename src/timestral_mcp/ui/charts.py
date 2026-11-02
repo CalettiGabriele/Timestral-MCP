@@ -1,0 +1,221 @@
+"""Interfacce Prefab (MCP App) e grafico PNG di riserva per previsioni e backtest."""
+
+from __future__ import annotations
+
+import io
+
+import numpy as np
+from prefab_ui.app import PrefabApp
+from prefab_ui.components import (
+    Alert,
+    AlertDescription,
+    Column,
+    DataTable,
+    DataTableColumn,
+    Heading,
+    Metric,
+    Row,
+    Tab,
+    Tabs,
+    Text,
+)
+from prefab_ui.components.charts import ChartSeries, LineChart
+
+from timestral_mcp.analytics.backtest import BacktestResult
+from timestral_mcp.analytics.forecast import ForecastResult
+from timestral_mcp.analytics.summary import _date, _pct, fmt, known_covariate_lines
+
+HISTORY_POINTS = 120
+C_HISTORY, C_MEDIAN, C_BOUND = "#2563eb", "#ea580c", "#94a3b8"
+
+
+def _val(v: float | None, nd: int = 4) -> float | None:
+    return None if v is None or not np.isfinite(v) else round(float(v), nd)
+
+
+def _warnings(items: list[str]) -> None:
+    for w in items:
+        with Alert(variant="warning"):
+            AlertDescription(w)
+
+
+def forecast_rows(r: ForecastResult, history_points: int = HISTORY_POINTS) -> list[dict]:
+    hist = r.history.iloc[-history_points:]
+    rows: list[dict] = [
+        {"date": _date(ts, r.freq), "storico": _val(v), "mediana": None, "basso": None, "alto": None}
+        for ts, v in hist.items()
+    ]
+    anchor = rows[-1]["storico"]  # raccorda storico e previsione
+    rows[-1].update(mediana=anchor, basso=anchor, alto=anchor)
+    med, lo, hi = r.median, r.lower, r.upper
+    rows += [
+        {
+            "date": _date(ts, r.freq),
+            "storico": None,
+            "mediana": _val(med[i]),
+            "basso": _val(lo[i]),
+            "alto": _val(hi[i]),
+        }
+        for i, ts in enumerate(r.future_index)
+    ]
+    return rows
+
+
+def forecast_app(r: ForecastResult) -> PrefabApp:
+    lo_l, hi_l = r.bounds
+    med, lo, hi = r.median, r.lower, r.upper
+    last_val = float(r.history.dropna().iloc[-1])
+    peak = int(np.argmax(med))
+    table = [
+        {
+            "data": _date(ts, r.freq),
+            "mediana": _val(med[i], 2),
+            "basso": _val(lo[i], 2),
+            "alto": _val(hi[i], 2),
+        }
+        for i, ts in enumerate(r.future_index)
+    ]
+    with Column(gap=4, css_class="p-4") as view:
+        Heading(f"Previsione di {r.target}")
+        Text(
+            f"Timestral-{r.model} · serie '{r.series}' · {r.horizon} periodi · "
+            f"intervallo {r.interval:.0%} · contesto {r.context_length} punti",
+            css_class="text-sm text-muted-foreground",
+        )
+        _warnings(r.warnings)
+        for line in known_covariate_lines(r):
+            Text(f"Covariata usata: {line}", css_class="text-sm text-muted-foreground")
+        with Row(gap=3, css_class="flex-wrap"):
+            Metric(label="Ultimo osservato", value=fmt(last_val))
+            Metric(
+                label="Mediana a fine orizzonte",
+                value=fmt(med[-1]),
+                delta=_pct(med[-1], last_val),
+            )
+            Metric(
+                label=f"Intervallo {r.interval:.0%} a fine orizzonte", value=f"{fmt(lo[-1])} – {fmt(hi[-1])}"
+            )
+            Metric(
+                label="Picco previsto", value=fmt(med[peak]), description=_date(r.future_index[peak], r.freq)
+            )
+        with Tabs(value="grafico", variant="line"):
+            with Tab("Grafico", value="grafico"):
+                LineChart(
+                    data=forecast_rows(r),
+                    series=[
+                        ChartSeries(data_key="storico", label="Storico", color=C_HISTORY),
+                        ChartSeries(data_key="mediana", label="Previsione (mediana)", color=C_MEDIAN),
+                        ChartSeries(
+                            data_key="basso", label=f"Limite basso (P{round(lo_l * 100)})", color=C_BOUND
+                        ),
+                        ChartSeries(
+                            data_key="alto", label=f"Limite alto (P{round(hi_l * 100)})", color=C_BOUND
+                        ),
+                    ],
+                    x_axis="date",
+                    height=380,
+                    show_dots=False,
+                    show_legend=True,
+                    animate=False,
+                )
+            with Tab("Tabella", value="tabella"):
+                DataTable(
+                    columns=[
+                        DataTableColumn(key="data", header="Data", sortable=True),
+                        DataTableColumn(key="mediana", header="Mediana", sortable=True),
+                        DataTableColumn(key="basso", header=f"P{round(lo_l * 100)}", sortable=True),
+                        DataTableColumn(key="alto", header=f"P{round(hi_l * 100)}", sortable=True),
+                    ],
+                    rows=table,
+                    search=True,
+                    paginated=True,
+                    page_size=12,
+                )
+    return PrefabApp(title=f"Previsione {r.target}", view=view)
+
+
+def backtest_app(b: BacktestResult) -> PrefabApp:
+    s = b.summary
+    rows: list[dict] = []
+    for f in b.folds:
+        for i, ts in enumerate(f.dates):
+            rows.append(
+                {
+                    "date": f"{ts:%Y-%m-%d}",
+                    "reale": _val(f.actual[i]),
+                    "previsione": _val(f.median[i]),
+                    "basso": _val(f.lower[i]),
+                    "alto": _val(f.upper[i]),
+                }
+            )
+    skill = s["skill_vs_seasonal_naive_pct"]
+    with Column(gap=4, css_class="p-4") as view:
+        Heading(f"Backtest di {b.target}")
+        Text(
+            f"Timestral-{b.model} · serie '{b.series}' · {s['folds']} finestre da {b.horizon} periodi",
+            css_class="text-sm text-muted-foreground",
+        )
+        _warnings(b.warnings)
+        with Row(gap=3, css_class="flex-wrap"):
+            Metric(
+                label="MASE (più basso = meglio)",
+                value=fmt(s["mase"]),
+                description=f"baseline {fmt(s['naive_mase'])}",
+            )
+            if skill is not None:
+                Metric(
+                    label="Rispetto alla baseline stagionale",
+                    value=f"{skill:+.0f}%",
+                    trend="up" if skill >= 0 else "down",
+                    trend_sentiment="positive" if skill >= 0 else "negative",
+                )
+            Metric(label="WQL (più basso = meglio)", value=fmt(s["wql"], 3))
+            if s["interval_coverage_pct"] is not None:
+                Metric(
+                    label=f"Copertura intervallo {s['interval_nominal_pct']:.0f}%",
+                    value=f"{s['interval_coverage_pct']:.0f}%",
+                    description="valori reali dentro l'intervallo",
+                )
+        LineChart(
+            data=rows,
+            series=[
+                ChartSeries(data_key="reale", label="Reale", color=C_HISTORY),
+                ChartSeries(data_key="previsione", label="Previsione (mediana)", color=C_MEDIAN),
+                ChartSeries(data_key="basso", label="Limite basso", color=C_BOUND),
+                ChartSeries(data_key="alto", label="Limite alto", color=C_BOUND),
+            ],
+            x_axis="date",
+            height=340,
+            show_dots=False,
+            animate=False,
+        )
+    return PrefabApp(title=f"Backtest {b.target}", view=view)
+
+
+def forecast_png(r: ForecastResult, history_points: int = HISTORY_POINTS) -> bytes:
+    """Grafico statico con bande piene (alternativa per i client senza MCP Apps)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    hist = r.history.iloc[-history_points:]
+    fig, ax = plt.subplots(figsize=(10, 4.8), dpi=130)
+    ax.plot(hist.index, hist.values, color=C_HISTORY, lw=1.6, label="Storico")
+    outer_lo, outer_hi = r.bounds
+    ax.fill_between(
+        r.future_index, r.lower, r.upper, color=C_MEDIAN, alpha=0.15, label=f"Intervallo {r.interval:.0%}"
+    )
+    ax.fill_between(r.future_index, r.q(0.25), r.q(0.75), color=C_MEDIAN, alpha=0.3, label="Intervallo 50%")
+    ax.plot(r.future_index, r.median, color=C_MEDIAN, lw=2, label="Previsione (mediana)")
+    ax.axvline(hist.index[-1], color="#64748b", lw=0.8, ls="--")
+    ax.set_title(f"{r.target} · serie '{r.series}' · Timestral-{r.model}")
+    ax.grid(alpha=0.25)
+    ax.legend(loc="upper left", frameon=False)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    fig.autofmt_xdate()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    return buf.getvalue()

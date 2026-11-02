@@ -1,0 +1,46 @@
+[project]
+name = "timestral-mcp"
+version = "0.1.0"
+description = "MCP server exposing Mistral's Timestral models for probabilistic time series forecasting"
+authors = [
+    { name = "Gabriele Caletti" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp[apps]>=4",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
+    "openpyxl>=3.1.5",
+    "pandas>=3.1.0",
+    "timestral",
+]
+
+[project.scripts]
+timestral-mcp = "timestral_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+timestral = { git = "https://github.com/mistralai/timestral.git", rev = "a534bdbd244d64f3d9d743f46c7bf6fc330ed4ff" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1",
+    "ruff>=0.17.3",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "B008"]
