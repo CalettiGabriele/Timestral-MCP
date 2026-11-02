@@ -23,6 +23,8 @@ from pydantic import Field
 from timestral_mcp import models
 from timestral_mcp.analytics import backtest as bt
 from timestral_mcp.analytics.covariates import future_block
+from timestral_mcp.analytics.decision import quantity_for_service_level as service_quantity
+from timestral_mcp.analytics.decision import threshold_probability as threshold_prob
 from timestral_mcp.analytics.forecast import run_forecast
 from timestral_mcp.analytics.profile import profile_dataset as build_profile
 from timestral_mcp.analytics.summary import backtest_summary, forecast_details, forecast_summary
@@ -59,7 +61,7 @@ Per un totale mensile completo controlla `partial_periods` in get_forecast_detai
 Se un modello non è ancora scaricato, forecast/backtest lo segnalano: chiedi conferma all'utente prima di ripetere \
 con allow_download=true (il download può richiedere minuti).
 
-backtest può durare: se il client supporta i Task MCP gira in background, altrimenti entro un tempo massimo.
+Altri strumenti: threshold_probability e quantity_for_service_level per soglie e scorte. backtest può durare: se il client supporta i Task MCP gira in background, altrimenti entro un tempo massimo. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
 """
 
 
@@ -358,6 +360,39 @@ async def backtest(
     result = bt.finish_backtest(plan, folds, bt_id)
     backtests.put(bt_id, result)
     return ToolResult(content=backtest_summary(result), structured_content=backtest_app(result))
+
+
+# --------------------------------------------------------------------------- decisioni
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+@user_errors
+async def threshold_probability(
+    forecast_id: str,
+    threshold: Annotated[float, Field(description="Soglia da confrontare (es. 150).")],
+    direction: Annotated[
+        Literal["below", "above"],
+        Field(description="below: probabilità di stare sotto la soglia; above: sopra."),
+    ] = "below",
+    start: str | None = None,
+    end: str | None = None,
+) -> dict:
+    """Probabilità di essere sotto/sopra una soglia in ciascun periodo, interpolata tra i quantili (con limiti espliciti nelle code)."""
+    return threshold_prob(forecasts.get(forecast_id), threshold, direction, start, end)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+@user_errors
+async def quantity_for_service_level(
+    forecast_id: str,
+    service_level: Annotated[
+        float, Field(ge=0.5, le=0.99, description="Quota di casi da coprire, es. 0.9 = 90%.")
+    ] = 0.9,
+    start: str | None = None,
+    end: str | None = None,
+) -> dict:
+    """Quantità necessaria per coprire una data quota di casi (es. scorte): per periodo e totale sulla finestra (lead time), con intervallo cautelativo/indipendente."""
+    return service_quantity(forecasts.get(forecast_id), service_level, start, end)
 
 
 # --------------------------------------------------------------------------- esportazione
