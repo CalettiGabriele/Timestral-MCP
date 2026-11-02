@@ -18,10 +18,11 @@ from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Image
 from fastmcp_tasks import TasksExtension
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from timestral_mcp import models
 from timestral_mcp.analytics import backtest as bt
+from timestral_mcp.analytics import scenarios as sc
 from timestral_mcp.analytics.calendar import FEATURES as CALENDAR_FEATURES
 from timestral_mcp.analytics.calendar import add_calendar_features as build_calendar
 from timestral_mcp.analytics.covariates import future_block
@@ -43,6 +44,7 @@ from timestral_mcp.ui.charts import (
     backtest_app,
     forecast_app,
     forecast_png,
+    scenario_app,
 )
 
 INSTRUCTIONS = """\
@@ -63,7 +65,7 @@ Per un totale mensile completo controlla `partial_periods` in get_forecast_detai
 Se un modello non è ancora scaricato, forecast/backtest lo segnalano: chiedi conferma all'utente prima di ripetere \
 con allow_download=true (il download può richiedere minuti).
 
-Altri strumenti: add_calendar_features per festività e calendario commerciale come covariate note; threshold_probability e quantity_for_service_level per soglie e scorte. backtest può durare: se il client supporta i Task MCP gira in background, altrimenti entro un tempo massimo. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
+Altri strumenti: add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if (es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte. backtest può durare: se il client supporta i Task MCP gira in background, altrimenti entro un tempo massimo. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
 """
 
 
@@ -364,6 +366,18 @@ async def backtest(
     return ToolResult(content=backtest_summary(result), structured_content=backtest_app(result))
 
 
+# --------------------------------------------------------------------------- tipi condivisi
+
+
+ModelSize = Literal["5M", "28M", "123M", "209M"]
+DownloadFlag = Annotated[
+    bool,
+    Field(
+        description="Consenti il download dei pesi del modello se non è ancora sul disco. Usare solo dopo la conferma dell'utente."
+    ),
+]
+
+
 # --------------------------------------------------------------------------- decisioni
 
 
@@ -406,6 +420,62 @@ async def add_calendar_features(
     )
     datasets.put(new_id, new_ds)
     return info
+
+
+class ScenarioChange(BaseModel):
+    column: str = Field(description="Covariata nota da modificare (es. 'promo').")
+    value: float = Field(description="Nuovo valore (es. 1 per attivare un indicatore 0/1).")
+    start: str | None = Field(
+        default=None, description="Prima data modificata (YYYY-MM-DD); default: inizio orizzonte."
+    )
+    end: str | None = Field(
+        default=None, description="Ultima data modificata inclusa; default: fine orizzonte."
+    )
+
+
+@mcp.tool(app=True, annotations={"readOnlyHint": False})
+@user_errors
+async def scenario_forecast(
+    dataset_id: str,
+    target: str,
+    horizon: Annotated[int, Field(ge=1)],
+    known_covariates: Annotated[
+        list[str], Field(description="Covariate note in anticipo (servono righe future nel dataset).")
+    ],
+    scenarios: Annotated[
+        dict[str, list[ScenarioChange]],
+        Field(
+            description="Scenari what-if: nome → cambi alle covariate future. Es. {'promo_10_16_feb': [{'column':'promo','value':1,'start':'2026-02-10','end':'2026-02-16'}]}. Max 5."
+        ),
+    ],
+    series: str | None = None,
+    model: ModelSize | None = None,
+    interval: Annotated[float, Field(gt=0, lt=1)] = 0.8,
+    past_covariates: list[str] | None = None,
+    allow_download: DownloadFlag = False,
+) -> ToolResult:
+    """What-if: confronta la previsione base con scenari in cui cambiano i valori futuri di covariate note (es. 'e se faccio una promozione?'). Mostra grafico e differenze."""
+    ds = datasets.get(dataset_id)
+    size = models.normalize_size(model)
+    models.ensure_available(size, allow_download)
+    result = await anyio.to_thread.run_sync(
+        partial(
+            sc.run_scenarios,
+            ds,
+            target=target,
+            horizon=horizon,
+            series=series,
+            model=size,
+            interval=interval,
+            past_covariates=past_covariates,
+            known_covariates=known_covariates,
+            id_factory=forecasts.new_id,
+            scenarios={n: [c.model_dump() for c in chs] for n, chs in scenarios.items()},
+        )
+    )
+    for r in (result.base, *result.scenarios.values()):
+        forecasts.put(r.id, r)
+    return ToolResult(content=sc.scenario_summary(result), structured_content=scenario_app(result))
 
 
 @mcp.tool(annotations={"readOnlyHint": True})

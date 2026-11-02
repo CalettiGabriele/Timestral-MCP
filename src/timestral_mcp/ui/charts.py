@@ -23,6 +23,7 @@ from prefab_ui.components.charts import ChartSeries, LineChart
 
 from timestral_mcp.analytics.backtest import BacktestResult
 from timestral_mcp.analytics.forecast import ForecastResult
+from timestral_mcp.analytics.scenarios import BASE, ScenarioResult
 from timestral_mcp.analytics.summary import _date, _pct, fmt, known_covariate_lines
 
 HISTORY_POINTS = 120
@@ -190,6 +191,83 @@ def backtest_app(b: BacktestResult) -> PrefabApp:
             animate=False,
         )
     return PrefabApp(title=f"Backtest {b.target}", view=view)
+
+
+SCENARIO_COLORS = ["#2563eb", "#16a34a", "#9333ea", "#dc2626", "#0891b2", "#ca8a04"]
+
+
+def scenario_app(sr: ScenarioResult) -> PrefabApp:
+    base = sr.base
+    names = [BASE, *sr.scenarios]
+    results = {BASE: base, **sr.scenarios}
+    keys = {n: f"s{i}" for i, n in enumerate(names)}
+    hist = base.history.iloc[-60:]
+    rows: list[dict] = [{"date": _date(ts, base.freq), "storico": _val(v)} for ts, v in hist.items()]
+    anchor = rows[-1]["storico"]
+    for n in names:
+        rows[-1][keys[n]] = anchor
+    for i, ts in enumerate(base.future_index):
+        row = {"date": _date(ts, base.freq)}
+        for n in names:
+            row[keys[n]] = _val(results[n].median[i])
+        rows.append(row)
+    comp = [
+        {
+            "scenario": r["scenario"],
+            "totale": r["total_median"],
+            "vs_base": r["delta_vs_base"],
+            "vs_base_pct": r["delta_vs_base_pct"],
+            "finestra": r.get("changed_window", "-"),
+            "effetto_finestra": r.get("window_delta"),
+            "dopo_finestra": r.get("after_window_delta"),
+        }
+        for r in sr.comparison
+    ]
+    with Column(gap=4, css_class="p-4") as view:
+        Heading(f"Scenari per {sr.target}")
+        Text(
+            f"Timestral-{base.model} · serie '{sr.series}' · {sr.horizon} periodi · mediane a confronto",
+            css_class="text-sm text-muted-foreground",
+        )
+        _warnings(sr.warnings)
+        with Row(gap=3, css_class="flex-wrap"):
+            for r in sr.comparison[1:]:
+                Metric(
+                    label=f"{r['scenario']} vs base",
+                    value=f"{r['delta_vs_base']:+,.0f}",
+                    delta=None if r["delta_vs_base_pct"] is None else f"{r['delta_vs_base_pct']:+.1f}%",
+                )
+        LineChart(
+            data=rows,
+            series=[
+                ChartSeries(data_key="storico", label="Storico", color="#64748b"),
+                *[
+                    ChartSeries(
+                        data_key=keys[n],
+                        label="Base" if n == BASE else n,
+                        color=SCENARIO_COLORS[i % len(SCENARIO_COLORS)],
+                    )
+                    for i, n in enumerate(names)
+                ],
+            ],
+            x_axis="date",
+            height=380,
+            show_dots=False,
+            animate=False,
+        )
+        DataTable(
+            columns=[
+                DataTableColumn(key="scenario", header="Scenario"),
+                DataTableColumn(key="totale", header="Totale", sortable=True),
+                DataTableColumn(key="vs_base", header="vs base", sortable=True),
+                DataTableColumn(key="vs_base_pct", header="vs base %", sortable=True),
+                DataTableColumn(key="finestra", header="Finestra modificata"),
+                DataTableColumn(key="effetto_finestra", header="Effetto nella finestra"),
+                DataTableColumn(key="dopo_finestra", header="Dopo la finestra"),
+            ],
+            rows=comp,
+        )
+    return PrefabApp(title=f"Scenari {sr.target}", view=view)
 
 
 def forecast_png(r: ForecastResult, history_points: int = HISTORY_POINTS) -> bytes:
