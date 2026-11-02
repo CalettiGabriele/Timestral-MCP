@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pandas as pd
+
 from timestral_mcp.analytics import anomalies as an
 from timestral_mcp.analytics import backtest as bt
 from timestral_mcp.analytics import batch as bm
@@ -18,6 +20,9 @@ backtests: Store[bt.BacktestResult] = Store("bt", settings.max_forecasts)
 batches: Store[bm.BatchResult] = Store("bm", settings.max_batches)
 anomaly_runs: Store[an.AnomalyResult] = Store("an", settings.max_batches)
 importance_runs: Store[im.ImportanceResult] = Store("im", settings.max_batches)
+uploads: Store[pd.DataFrame] = Store(
+    "up", settings.max_datasets
+)  # tabelle caricate dall'interfaccia, per nome file
 
 
 def resolve_forecast(forecast_id: str) -> ForecastResult:

@@ -104,6 +104,25 @@ def read_source(source: str, sheet: str | None = None, max_rows: int = 2_000_000
     return df, origin
 
 
+def read_bytes(name: str, data: bytes, max_rows: int = 2_000_000) -> pd.DataFrame:
+    """Legge il contenuto di un file caricato dall'interfaccia (CSV/TSV/TXT oppure Excel .xlsx/.xlsm)."""
+    suffix = Path(name).suffix.lower()
+    if suffix in {".xlsx", ".xlsm"}:
+        df = pd.read_excel(io.BytesIO(data))
+    elif suffix in {".csv", ".tsv", ".txt"}:
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = data.decode("latin-1")
+        df = _read_text(text)
+    else:
+        raise ValueError(f"Formato {suffix or name!r} non supportato: usa CSV, TSV, TXT o Excel (.xlsx).")
+    if len(df) > max_rows:
+        raise ValueError(f"Troppe righe ({len(df):,}): il limite è {max_rows:,}.")
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
 def _read_text(text: str) -> pd.DataFrame:
     try:
         df = pd.read_csv(io.StringIO(text), sep=None, engine="python")

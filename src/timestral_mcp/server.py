@@ -47,7 +47,10 @@ from timestral_mcp.session import (
     importance_runs,
     resolve_forecast,
     settings,
+    uploads,
 )
+from timestral_mcp.studio import studio as studio_app
+from timestral_mcp.studio import uploader
 from timestral_mcp.ui.charts import (
     anomalies_app,
     backtest_app,
@@ -76,7 +79,16 @@ Per un totale mensile completo controlla `partial_periods` in get_forecast_detai
 Se un modello non è ancora scaricato, forecast/backtest lo segnalano: chiedi conferma all'utente prima di ripetere \
 con allow_download=true (il download può richiedere minuti).
 
-Altri strumenti: forecast_many per molti prodotti/negozi insieme (poi batch_series_forecast per una serie); add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if (es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte; detect_anomalies per picchi, crolli e possibili rotture di stock; covariate_importance per capire quali covariate aiutano davvero (ablation). backtest, forecast_many, detect_anomalies e covariate_importance possono durare: se il client supporta i Task MCP girano in background, altrimenti entro un tempo massimo e dichiarano cosa non hanno eseguito. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
+Interfacce: forecast_studio apre una schermata unica per impostare tutto (serie, target, orizzonte, modello, \
+covariate) e calcolare, con grafico, backtest e invio dei numeri a te; upload_dataset permette all'utente di trascinare file \
+CSV/Excel senza passare dalla chat (poi list_session_items per gli id). Dopo averle aperte FERMATI e attendi l'utente.
+
+Altri strumenti: forecast_many per molti prodotti/negozi insieme (poi batch_series_forecast per una serie); \
+add_calendar_features per festività e calendario commerciale come covariate note; scenario_forecast per what-if \
+(es. promozioni); threshold_probability e quantity_for_service_level per soglie e scorte; detect_anomalies per picchi, \
+crolli e possibili rotture di stock; covariate_importance per capire quali covariate aiutano davvero (ablation). \
+backtest, forecast_many, detect_anomalies e covariate_importance possono durare: se il client supporta i Task MCP girano in \
+background, altrimenti entro un tempo massimo e dichiarano cosa non hanno eseguito. Le probabilità e i totali su più periodi sono approssimati dai quantili: dillo.
 """
 
 
@@ -102,6 +114,8 @@ _skills_root = settings.skills_dir or Path(__file__).resolve().parents[2] / "ski
 _skill_roots = [p for p in (_skills_root / "core", _skills_root / "verticals" / "sales") if p.is_dir()]
 if _skill_roots:
     mcp.add_provider(SkillsDirectoryProvider(roots=_skill_roots))
+mcp.add_provider(studio_app)
+mcp.add_provider(uploader)
 
 
 def user_errors(fn):
@@ -153,14 +167,22 @@ async def load_dataset(
     ctx: Context | None = None,
 ) -> dict:
     """Carica i dati e li prepara per la previsione. Restituisce un dataset_id da usare negli altri tool."""
-    df, origin = await anyio.to_thread.run_sync(partial(read_source, source, sheet, settings.max_rows))
+    if source.startswith(
+        "upload:"
+    ):  # file caricato dall'interfaccia (upload_dataset), riletto con scelte manuali
+        df, origin = uploads.get(source.removeprefix("upload:").strip()).copy(), source
+    else:
+        df, origin = await anyio.to_thread.run_sync(partial(read_source, source, sheet, settings.max_rows))
     ds_id = datasets.new_id()
     ds = await anyio.to_thread.run_sync(
         partial(
             build_dataset,
             df,
             dataset_id=ds_id,
-            name=name or (Path(origin).stem if origin != "testo incollato" else "dati incollati"),
+            name=name
+            or (
+                Path(origin.removeprefix("upload:")).stem if origin != "testo incollato" else "dati incollati"
+            ),
             source=origin,
             date_column=date_column,
             series_column=series_column,

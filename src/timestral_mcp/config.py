@@ -33,6 +33,7 @@ class Settings:
     max_batches: int = 20
     max_batch_series: int = 100
     max_anomaly_windows: int = 60
+    max_upload_mb: int = 25
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -52,6 +53,7 @@ class Settings:
             max_rows=int(os.environ.get("TIMESTRAL_MAX_ROWS", cls.max_rows)),
             max_batch_series=int(os.environ.get("TIMESTRAL_MAX_BATCH_SERIES", cls.max_batch_series)),
             max_anomaly_windows=int(os.environ.get("TIMESTRAL_MAX_ANOMALY_WINDOWS", cls.max_anomaly_windows)),
+            max_upload_mb=int(os.environ.get("TIMESTRAL_MAX_UPLOAD_MB", cls.max_upload_mb)),
         )
 
 
