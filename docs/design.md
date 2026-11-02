@@ -44,7 +44,7 @@ fc = model.forecast(
     # observation_mask=...
 )
 fc.quantiles  # (B, V, H, 21)
-fc.median     # (B, V, H)
+fc.median  # (B, V, H)
 fc.quantile(0.1)
 ```
 
@@ -69,7 +69,7 @@ timestral-mcp/
 │   ├── config.py            # settings from environment variables
 │   ├── models.py            # lazy loading and caching of the model sizes
 │   ├── data/                # ingestion, frequency inference, dataset store
-│   ├── analytics/           # profile, covariates, forecast, backtest, summaries (pure Python, MCP-independent)
+│   ├── analytics/           # profile, covariates, calendar, forecast, backtest, scenarios, anomalies, decision, batch, summaries (pure Python, MCP-independent)
 │   ├── ui/                  # charts
 │   └── tools/
 ├── skills/
@@ -83,25 +83,30 @@ timestral-mcp/
 Principle: **tools are general** (valid for any time series), **skills carry the domain knowledge**. Skills do not compute anything: they tell Claude which tools to use, in which order and how to interpret the results.
 
 ### 3.1 Tool catalog
-Wave 1 is implemented in Milestone 1; waves 2 and 3 are planned.
+Implemented so far: wave 1 plus `add_calendar_features`, `scenario_forecast`, `detect_anomalies`, `threshold_probability`, `quantity_for_service_level` and the multi-series tools (`forecast_many`, `batch_series_forecast`, `export_batch`). Still planned: the rest of waves 2 and 3.
 
 | Area | Tool | Description | Wave |
 |---|---|---|---|
 | Ingestion | `load_dataset` | CSV, Excel or pasted data → `dataset_id`; detects date, series ID and value columns | 1 |
 | EDA | `profile_dataset` | length, frequency, gaps, missing values, statistics | 1 |
-| EDA | `analyze_seasonality`, `test_stationarity`, `analyze_covariates`, `covariate_importance` | STL, ADF/KPSS, lagged correlations, ablation-based importance | 2 |
-| Preparation | `regularize_series`, `clean_series`, `add_calendar_features` | resampling, outliers, calendar/holiday covariates | 1–2 |
+| EDA | `covariate_importance` | ablation-based importance with per-window agreement and verdict | 2 (done) |
+| EDA | `analyze_seasonality`, `test_stationarity`, `analyze_covariates` | STL, ADF/KPSS, lagged correlations | 4 |
+| Preparation | `add_calendar_features` | holiday, pre-holiday, bridge, Black Friday, Christmas and Easter covariates (daily or finer data) | 2 (done) |
+| Preparation | `regularize_series`, `clean_series` | resampling, outlier handling | 2 |
 | Forecast | `forecast` | probabilistic forecast with interactive chart | 1 |
-| Forecast | `scenario_forecast`, `compare_models` | what-if on future covariates, model/baseline comparison | 2–3 |
+| Forecast | `forecast_many`, `batch_series_forecast`, `export_batch` | many series at once with summary table, drill-down and export | 2 (done) |
+| Interface | `forecast_studio`, `upload_dataset` | one-screen form to set everything and run (chart, table, backtest, send to Claude, Excel); drag-and-drop file upload | 2 (done) |
+| Forecast | `scenario_forecast` | what-if on future covariates, compared with the base forecast | 2 (done) |
+| Forecast | `compare_models` | model/baseline comparison | 3 |
 | Evaluation | `backtest` | rolling origin: MASE, interval coverage, seasonal-naive baseline | 1 |
-| Evaluation | `detect_anomalies`, `threshold_probability`, `quantity_for_service_level` | points outside the bands, threshold probabilities, quantity for a service level | 1–2 |
+| Evaluation | `detect_anomalies`, `threshold_probability`, `quantity_for_service_level` | points outside the bands, threshold probabilities, quantity for a service level | 2 (done) |
 | Evaluation | `summarize_forecast`, `get_forecast_details`, `export_results` | text summaries, per-period/aggregated details, CSV/Excel export | 1 |
 | Visualization | `forecast_chart_image` | PNG fallback for clients without UI | 1 |
 
 Caveat repeated in the skills: Timestral handles NaNs and normalizes internally; the series must **not** be differenced or made stationary.
 
 ### 3.2 Long-running operations
-Long operations (backtests, model comparison, many series) are intended to use MCP Tasks via `fastmcp[tasks]`, with progress reporting and a configurable work budget. Some clients only support the legacy protocol, where tasks are unavailable; in that case the tool runs synchronously and reduces its workload, stating so in the result.
+Long operations (backtests, model comparison, many series) are intended to use MCP Tasks via `fastmcp[tasks]`, with progress reporting and a configurable work budget. Claude Desktop negotiates the legacy protocol (seen in its server log), where tasks are unavailable; in that case the tool runs synchronously and reduces its workload, stating so in the result. Currently implemented: `forecast_many` stops after `max_seconds` and lists the series not run; `detect_anomalies` caps the number of windows (`TIMESTRAL_MAX_ANOMALY_WINDOWS`); `forecast_many` keeps at most `TIMESTRAL_MAX_BATCH_SERIES` series (the largest by recent volume), with per-series backtests limited to 30 series. All of them report progress. `backtest`, `forecast_many`, `detect_anomalies` and `covariate_importance` are declared `task=True` (`fastmcp[tasks]`, `TasksExtension` with the default in-memory backend). With a client on the modern protocol the call runs as a background task, progress is exposed through the `Progress` dependency (and MCP progress notifications when synchronous), and the default time budget is 900 s; with a legacy client it runs synchronously and the budget is 90 s (`progress.py`). Verified with the in-memory FastMCP client in both modes and over stdio in legacy mode; not verified against a real modern-protocol client. Tasks live in memory: a Redis/Valkey backend and a shared encryption key are needed for multi-instance deployments (Milestone 3).
 
 ### 3.3 Data sources
 Passing data as a tool argument costs tokens and risks transcription errors, so sources are layered: pasted data (small datasets), local file path (stdio), then URLs and cloud buckets (planned). Datasets are stored under a `dataset_id` (in memory locally).
@@ -119,7 +124,9 @@ Passing data as a tool argument costs tokens and risks transcription errors, so 
 Not verified: the rendering of the interactive chart in every client, and model sizes other than the ones tested.
 
 ### Milestone 2: full local experience
-Forecast Studio (a FastMCPApp to set all preferences from the UI), file upload, MCP Tasks with budgets, `detect_anomalies`, calendar/holiday features, promotion scenarios, stock for a given service level.
+Implemented: multi-series forecasting, calendar/holiday features, promotion scenarios, `detect_anomalies`, threshold probabilities, stock for a given service level, and the sales skills that go with them (`promotions-and-pricing`, `sales-anomalies`, `sales-reporting`, `anomaly-investigation`).
+Also implemented: the **Forecast Studio** (a `FastMCPApp`: the model-visible entry tool `forecast_studio` draws the form; the app-only backend tools `studio_run` and `studio_export` run the forecast and save results; results go to the same session stores as the normal tools, so Claude can follow up with `get_forecast_details`) and **file upload** (`upload_dataset`, with an app-only `store_upload` that turns each dropped file into a dataset and adds its id to the model context through `UpdateContext`).
+Also implemented: MCP Tasks for the long tools and `covariate_importance`. Untested outside automated tests: how the Studio renders in each client, and Tasks against a real modern-protocol client.
 
 ### Milestone 3: cloud and teams
 Docker image, Terraform modules for AWS (Bedrock AgentCore Runtime, with ECS Express Mode as an alternative) and Google Cloud Run, OIDC login, datasets on S3/GCS, hardening (limits, rate limiting, logging, CI), guides for claude.ai and ChatGPT.
@@ -131,6 +138,9 @@ Seasonality and covariate analysis, model comparison, generative UI, reports, mo
 - **Young library**: not on PyPI; pin the commit and isolate the integration in a single module.
 - **Prefab UI changes often**: pin the version; custom HTML is the fallback for richer charts.
 - **Two MCP protocol eras**: elicitation and tasks behave differently; test with the real clients.
+- **Many tools in the model's context**: the server exposes 19 model-facing tools (plus 3 app-only backend tools that hosts hide); if tool selection degrades, hide the advanced ones behind tags/visibility.
+- **Scenario effects are model estimates**: derived from the historical relationship with a covariate, not causal; the tool warns when a covariate was active only a few times in the history.
+- **Aggregated intervals are approximate**: quantiles of a sum cannot be derived from per-period quantiles; the tools return ranges and say so.
 - **Image size**: CPU-only torch plus weights (up to ~1.5 GB with all sizes).
 - **Horizons beyond 1,024 steps**: uncertainty is underestimated; the result warns about it.
 - **Sensitive data**: a hosted deployment needs authentication, dataset TTLs and no logging of values.
