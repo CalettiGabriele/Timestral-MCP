@@ -55,7 +55,13 @@ def fan_cells(x0: float, y_med: float, slope: float, cols: int, cell: float, gap
 
     The five bands echo the stacked stripes of the Mistral mark, re-coloured in ultramarine tints.
     """
-    tints = [C["white"], C["ultramarine-100"], C["ultramarine-200"], C["ultramarine-400"], C["ultramarine-500"]]
+    tints = [
+        C["white"],
+        C["ultramarine-100"],
+        C["ultramarine-200"],
+        C["ultramarine-400"],
+        C["ultramarine-500"],
+    ]
     pitch = cell + gap
     cells = []
     for i in range(cols):
@@ -87,8 +93,11 @@ def panel(x: float, y: float, size: float, animate: bool, label: bool) -> tuple[
     hist = series(40, 268, 318, 80)
     now_x = 276
     fan = fan_cells(292, 244, 0.22, 8, 17, 4)
-    g = [f'<g transform="translate({x} {y}) scale({s:.5f})">', f'<rect width="512" height="512" fill="{C["ultramarine"]}"/>']
-    g.append(f'<rect width="512" height="512" filter="url(#grain-panel)"/>')
+    g = [
+        f'<g transform="translate({x} {y}) scale({s:.5f})">',
+        f'<rect width="512" height="512" fill="{C["ultramarine"]}"/>',
+    ]
+    g.append('<rect width="512" height="512" filter="url(#grain-panel)"/>')
     g.append(
         f'<path class="tm-rule" pathLength="1" d="{jitter([(24, 448), (488, 438)], 5, 0.7, 7)}" '
         'fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="1.6" stroke-linecap="round"/>'
@@ -159,9 +168,14 @@ def favicon() -> str:
         f'<rect x="{x}" y="{y}" width="5" height="5" fill="{f}"/>'
         for x, y, f in [
             (36, 26, "#fff"),
-            (43, 22, C["ultramarine-200"]), (43, 28, "#fff"), (43, 34, C["ultramarine-200"]),
-            (50, 16, C["ultramarine-400"]), (50, 22, C["ultramarine-200"]), (50, 28, "#fff"),
-            (50, 34, C["ultramarine-200"]), (50, 40, C["ultramarine-400"]),
+            (43, 22, C["ultramarine-200"]),
+            (43, 28, "#fff"),
+            (43, 34, C["ultramarine-200"]),
+            (50, 16, C["ultramarine-400"]),
+            (50, 22, C["ultramarine-200"]),
+            (50, 28, "#fff"),
+            (50, 34, C["ultramarine-200"]),
+            (50, 40, C["ultramarine-400"]),
         ]
     )
     body = (
