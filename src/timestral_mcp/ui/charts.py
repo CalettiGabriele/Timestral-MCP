@@ -28,9 +28,10 @@ from timestral_mcp.analytics.forecast import ForecastResult
 from timestral_mcp.analytics.importance import ImportanceResult
 from timestral_mcp.analytics.scenarios import BASE, ScenarioResult
 from timestral_mcp.analytics.summary import _date, _pct, fmt, known_covariate_lines
+from timestral_mcp.ui import theme
+from timestral_mcp.ui.theme import C_BOUND, C_HISTORY, C_MEDIAN, C_MUTED, SCENARIO_COLORS, THEME
 
 HISTORY_POINTS = 120
-C_HISTORY, C_MEDIAN, C_BOUND = "#2563eb", "#ea580c", "#94a3b8"
 
 
 def _val(v: float | None, nd: int = 4) -> float | None:
@@ -135,7 +136,7 @@ def forecast_app(r: ForecastResult) -> PrefabApp:
                     paginated=True,
                     page_size=12,
                 )
-    return PrefabApp(title=f"Previsione {r.target}", view=view)
+    return PrefabApp(theme=THEME, title=f"Previsione {r.target}", view=view)
 
 
 def backtest_app(b: BacktestResult) -> PrefabApp:
@@ -193,10 +194,7 @@ def backtest_app(b: BacktestResult) -> PrefabApp:
             show_dots=False,
             animate=False,
         )
-    return PrefabApp(title=f"Backtest {b.target}", view=view)
-
-
-SCENARIO_COLORS = ["#2563eb", "#16a34a", "#9333ea", "#dc2626", "#0891b2", "#ca8a04"]
+    return PrefabApp(theme=THEME, title=f"Backtest {b.target}", view=view)
 
 
 def batch_app(b: batchmod.BatchResult, sort_by: batchmod.SortBy = "volume") -> PrefabApp:
@@ -282,7 +280,7 @@ def batch_app(b: batchmod.BatchResult, sort_by: batchmod.SortBy = "volume") -> P
                     Heading("Saltate", css_class="text-base")
                     for k, v in list(b.skipped.items())[:15]:
                         Text(f"{k}: {v}", css_class="text-sm text-muted-foreground")
-    return PrefabApp(title=f"Previsione {b.target}", view=view)
+    return PrefabApp(theme=THEME, title=f"Previsione {b.target}", view=view)
 
 
 def scenario_app(sr: ScenarioResult) -> PrefabApp:
@@ -329,7 +327,7 @@ def scenario_app(sr: ScenarioResult) -> PrefabApp:
         LineChart(
             data=rows,
             series=[
-                ChartSeries(data_key="storico", label="Storico", color="#64748b"),
+                ChartSeries(data_key="storico", label="Storico", color=C_MUTED),
                 *[
                     ChartSeries(
                         data_key=keys[n],
@@ -356,7 +354,7 @@ def scenario_app(sr: ScenarioResult) -> PrefabApp:
             ],
             rows=comp,
         )
-    return PrefabApp(title=f"Scenari {sr.target}", view=view)
+    return PrefabApp(theme=THEME, title=f"Scenari {sr.target}", view=view)
 
 
 def anomalies_app(a: AnomalyResult, max_points: int = 400) -> PrefabApp:
@@ -423,7 +421,7 @@ def anomalies_app(a: AnomalyResult, max_points: int = 400) -> PrefabApp:
                 paginated=True,
                 page_size=10,
             )
-    return PrefabApp(title=f"Anomalie {a.target}", view=view)
+    return PrefabApp(theme=THEME, title=f"Anomalie {a.target}", view=view)
 
 
 def importance_app(r: ImportanceResult) -> PrefabApp:
@@ -480,7 +478,7 @@ def importance_app(r: ImportanceResult) -> PrefabApp:
             ],
             rows=table,
         )
-    return PrefabApp(title=f"Importanza covariate {r.target}", view=view)
+    return PrefabApp(theme=THEME, title=f"Importanza covariate {r.target}", view=view)
 
 
 def forecast_png(r: ForecastResult, history_points: int = HISTORY_POINTS) -> bytes:
@@ -489,24 +487,47 @@ def forecast_png(r: ForecastResult, history_points: int = HISTORY_POINTS) -> byt
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
 
+    # Solo i caratteri installati: matplotlib avvisa per ogni carattere mancante della lista.
+    installed = {f.name for f in font_manager.fontManager.ttflist}
+    fonts = [f for f in ("Arial", "Helvetica", "Liberation Sans") if f in installed] + ["DejaVu Sans"]
     hist = r.history.iloc[-history_points:]
-    fig, ax = plt.subplots(figsize=(10, 4.8), dpi=130)
-    ax.plot(hist.index, hist.values, color=C_HISTORY, lw=1.6, label="Storico")
-    outer_lo, outer_hi = r.bounds
-    ax.fill_between(
-        r.future_index, r.lower, r.upper, color=C_MEDIAN, alpha=0.15, label=f"Intervallo {r.interval:.0%}"
-    )
-    ax.fill_between(r.future_index, r.q(0.25), r.q(0.75), color=C_MEDIAN, alpha=0.3, label="Intervallo 50%")
-    ax.plot(r.future_index, r.median, color=C_MEDIAN, lw=2, label="Previsione (mediana)")
-    ax.axvline(hist.index[-1], color="#64748b", lw=0.8, ls="--")
-    ax.set_title(f"{r.target} · serie '{r.series}' · Timestral-{r.model}")
-    ax.grid(alpha=0.25)
-    ax.legend(loc="upper left", frameon=False)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    fig.autofmt_xdate()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight")
+    with plt.rc_context(
+        {
+            "font.family": fonts,
+            "text.color": theme.INK,
+            "axes.labelcolor": theme.GRAPHITE,
+            "xtick.color": theme.STONE,
+            "ytick.color": theme.STONE,
+            "axes.edgecolor": theme.SAND,
+        }
+    ):
+        fig, ax = plt.subplots(figsize=(10, 4.8), dpi=130, facecolor=theme.PAPER)
+        ax.set_facecolor(theme.PAPER)
+        ax.fill_between(
+            r.future_index,
+            r.lower,
+            r.upper,
+            color=theme.ULTRAMARINE_100,
+            lw=0,
+            label=f"Intervallo {r.interval:.0%}",
+        )
+        ax.fill_between(
+            r.future_index, r.q(0.25), r.q(0.75), color=theme.ULTRAMARINE_200, lw=0, label="Intervallo 50%"
+        )
+        ax.plot(hist.index, hist.values, color=theme.INK, lw=1.5, label="Storico")
+        ax.plot(r.future_index, r.median, color=theme.ULTRAMARINE, lw=2.2, label="Previsione (mediana)")
+        ax.axvline(hist.index[-1], color=theme.STONE, lw=0.8, ls=(0, (2, 4)))
+        ax.set_title(
+            f"{r.target} · serie '{r.series}' · Timestral-{r.model}", loc="left", fontweight="bold", pad=14
+        )
+        ax.grid(axis="y", color=theme.LINEN, lw=0.8)
+        ax.legend(loc="upper left", frameon=False)
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        fig.autofmt_xdate()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight", facecolor=theme.PAPER)
     plt.close(fig)
     return buf.getvalue()

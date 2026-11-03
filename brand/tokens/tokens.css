@@ -1,0 +1,86 @@
+/* Timestral MCP design tokens (mirror of tokens.json).
+   Use on the website, the docs site and in any HTML surface. */
+
+:root {
+  /* palette */
+  --tm-ink: #141414;
+  --tm-graphite: #4a463f;
+  --tm-stone: #8a8375;
+  --tm-sand: #c2baac;
+  --tm-linen: #d9d2c7;
+  --tm-paper: #e3ded5;
+  --tm-white: #ffffff;
+  --tm-ultramarine: #2336bc;
+  --tm-ultramarine-500: #3e4fc8;
+  --tm-ultramarine-400: #5464cc;
+  --tm-ultramarine-200: #9aa5e4;
+  --tm-ultramarine-100: #c9cff2;
+  --tm-ultramarine-50: #dde1f7;
+  --tm-signal-red: #bc2323;
+
+  /* type */
+  --tm-font-display: Arial, "Helvetica Neue", Helvetica, "Liberation Sans", sans-serif;
+  --tm-font-body: Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+  --tm-font-mono: "Courier New", Courier, "Liberation Mono", monospace;
+
+  /* roles, light */
+  --tm-bg: var(--tm-paper);
+  --tm-surface: var(--tm-linen);
+  --tm-surface-raised: var(--tm-white);
+  --tm-text: var(--tm-ink);
+  --tm-text-secondary: var(--tm-graphite);
+  --tm-text-muted: var(--tm-stone);
+  --tm-border: var(--tm-sand);
+  --tm-accent: var(--tm-ultramarine);
+  --tm-accent-text: var(--tm-ultramarine);
+  --tm-on-accent: var(--tm-white);
+
+  /* forecast charts */
+  --tm-chart-history: var(--tm-ink);
+  --tm-chart-median: var(--tm-ultramarine);
+  --tm-chart-band-98: var(--tm-ultramarine-50);
+  --tm-chart-band-90: var(--tm-ultramarine-100);
+  --tm-chart-band-80: var(--tm-ultramarine-200);
+  --tm-chart-band-50: var(--tm-ultramarine-400);
+  --tm-chart-actuals: var(--tm-stone);
+  --tm-chart-anomaly: var(--tm-signal-red);
+
+  --tm-radius: 0;
+  --tm-rule-identity: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tm-bg: var(--tm-ink);
+    --tm-surface: #1e1d1b;
+    --tm-surface-raised: #282624;
+    --tm-text: var(--tm-paper);
+    --tm-text-secondary: var(--tm-sand);
+    --tm-text-muted: var(--tm-stone);
+    --tm-border: var(--tm-graphite);
+    --tm-accent-text: var(--tm-ultramarine-200);
+    --tm-chart-history: var(--tm-paper);
+    --tm-chart-median: var(--tm-ultramarine-200);
+    --tm-chart-band-98: #1c2252;
+    --tm-chart-band-90: #222c78;
+    --tm-chart-band-80: var(--tm-ultramarine);
+    --tm-chart-band-50: var(--tm-ultramarine-400);
+  }
+}
+
+:root[data-theme="dark"] {
+  --tm-bg: var(--tm-ink);
+  --tm-surface: #1e1d1b;
+  --tm-surface-raised: #282624;
+  --tm-text: var(--tm-paper);
+  --tm-text-secondary: var(--tm-sand);
+  --tm-text-muted: var(--tm-stone);
+  --tm-border: var(--tm-graphite);
+  --tm-accent-text: var(--tm-ultramarine-200);
+  --tm-chart-history: var(--tm-paper);
+  --tm-chart-median: var(--tm-ultramarine-200);
+  --tm-chart-band-98: #1c2252;
+  --tm-chart-band-90: #222c78;
+  --tm-chart-band-80: var(--tm-ultramarine);
+  --tm-chart-band-50: var(--tm-ultramarine-400);
+}

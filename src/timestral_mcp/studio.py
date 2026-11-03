@@ -68,7 +68,8 @@ from timestral_mcp.analytics.summary import (
 from timestral_mcp.config import MODEL_SIZES, MODEL_WEIGHTS_MB
 from timestral_mcp.data.ingest import Dataset, build_dataset, read_bytes
 from timestral_mcp.session import backtests, datasets, forecasts, settings, uploads
-from timestral_mcp.ui.charts import C_BOUND, C_HISTORY, C_MEDIAN, forecast_rows
+from timestral_mcp.ui.charts import forecast_rows
+from timestral_mcp.ui.theme import C_BOUND, C_HISTORY, C_MEDIAN, THEME
 
 studio = FastMCPApp("Forecast Studio")
 uploader = FastMCPApp("Dataset Upload")
@@ -539,7 +540,7 @@ def forecast_studio(dataset_id: str | None = None, series: str | None = None) ->
                             on_error=ShowToast(ERROR, variant="error"),
                         ),
                     )
-    return PrefabApp(title="Forecast Studio", view=view, state=state)
+    return PrefabApp(theme=THEME, title="Forecast Studio", view=view, state=state)
 
 
 # ----------------------------------------------------------------------------- caricamento file dall'interfaccia
@@ -656,4 +657,4 @@ def upload_dataset() -> PrefabApp:
                             size="sm",
                             on_click=SendMessage(f"Apri il Forecast Studio sul dataset {f.dataset_id}"),
                         )
-    return PrefabApp(title="Carica dati", view=view, state={"pending": [], "stored": []})
+    return PrefabApp(theme=THEME, title="Carica dati", view=view, state={"pending": [], "stored": []})

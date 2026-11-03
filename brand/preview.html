@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>timestral identity</title>
+<link rel="icon" href="assets/favicon.svg">
+<link rel="stylesheet" href="tokens/tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--tm-bg); color: var(--tm-text); font: 15px/1.6 var(--tm-font-body); }
+  main { max-width: 1120px; margin: 0 auto; padding: 32px 24px 80px; }
+  .kicker, label, th { font-family: var(--tm-font-mono); text-transform: uppercase; letter-spacing: .22em; font-size: 11px; color: var(--tm-text-muted); font-weight: 400; }
+  h1, h2 { font-family: var(--tm-font-display); font-weight: 700; letter-spacing: -.02em; margin: 6px 0 16px; }
+  h1 { font-size: 34px; } h2 { font-size: 24px; }
+  section { padding: 40px 0; border-top: 1px solid var(--tm-border); }
+  .bar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; }
+  button { font: 11px var(--tm-font-mono); text-transform: uppercase; letter-spacing: .2em; background: transparent; color: var(--tm-text); border: 1px solid var(--tm-border); padding: 8px 12px; cursor: pointer; }
+  .primary { background: var(--tm-accent); color: var(--tm-on-accent); border-color: var(--tm-accent); }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  img { max-width: 100%; display: block; }
+  .swatch { border: 1px solid var(--tm-border); }
+  .swatch div { height: 72px; }
+  .swatch p { margin: 0; padding: 8px 10px; font: 12px var(--tm-font-mono); }
+  .card { background: var(--tm-surface-raised); border: 1px solid var(--tm-border); padding: 20px; }
+  .field { display: grid; gap: 4px; margin-bottom: 14px; }
+  select, input { font: 15px var(--tm-font-body); padding: 8px 10px; background: var(--tm-bg); color: var(--tm-text); border: 1px solid var(--tm-border); border-radius: 0; }
+  .rule { height: 4px; width: 220px; background: var(--tm-text); margin: 18px 0; }
+  .dot { display: inline-block; width: 12px; height: 12px; background: var(--tm-accent); vertical-align: -1px; margin-right: 10px; }
+  .statement { font: 700 56px/1.05 var(--tm-font-display); letter-spacing: -.035em; margin: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--tm-border); }
+  td.num { font-family: var(--tm-font-mono); }
+  .chart text { font: 11px var(--tm-font-mono); fill: var(--tm-text-muted); letter-spacing: .1em; }
+  .on-dark { background: var(--tm-ink); padding: 16px; }
+  .on-light { background: var(--tm-paper); padding: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="bar">
+    <span class="kicker">Identity · v0.1</span>
+    <button id="mode" type="button">Switch light / dark</button>
+  </div>
+
+  <picture id="hero">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
+    <img alt="timestral banner" src="assets/banner-light.svg">
+  </picture>
+
+  <section>
+    <span class="kicker">01 — Marks</span>
+    <h2>Panel, wordmark, favicon</h2>
+    <div class="grid">
+      <div><img src="assets/mark-animated.svg" alt="Animated mark"><p class="kicker">mark-animated.svg</p></div>
+      <div>
+        <div class="on-light"><img src="assets/wordmark-light.svg" alt="Wordmark, light"></div>
+        <p class="kicker">wordmark-light.svg</p>
+        <div class="on-dark"><img src="assets/wordmark-dark.svg" alt="Wordmark, dark"></div>
+        <p class="kicker">wordmark-dark.svg</p>
+        <div style="display:flex;gap:16px;align-items:end">
+          <img src="assets/favicon.svg" width="64" alt="Favicon 64"><img src="assets/favicon.svg" width="32" alt="Favicon 32"><img src="assets/favicon.svg" width="16" alt="Favicon 16">
+        </div>
+        <p class="kicker">favicon.svg · 64 / 32 / 16</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="kicker">02 — Colour</span>
+    <h2>Warm neutrals, one accent</h2>
+    <div class="grid" id="swatches"></div>
+  </section>
+
+  <section>
+    <span class="kicker">03 — Type</span>
+    <p class="statement">Less noise.<br>More signal.</p>
+    <div class="rule"></div>
+    <p style="max-width:620px;color:var(--tm-text-secondary)">Body text is set in Calibri: rational but not cold, so long explanations stay easy to read. Titles use Arial Bold with tight tracking; labels use Courier New in spaced capitals.</p>
+    <p class="kicker"><span class="dot"></span>Micro-label · Courier New · uppercase · spaced</p>
+  </section>
+
+  <section>
+    <span class="kicker">04 — In the apps</span>
+    <h2>Forecast Studio, restyled</h2>
+    <div class="grid" style="grid-template-columns:minmax(0,1fr) minmax(0,2fr)">
+      <div class="card">
+        <div class="field"><label for="s1">Column to forecast</label><select id="s1"><option>vendite</option></select></div>
+        <div class="field"><label for="s2">Horizon</label><input id="s2" type="number" value="90"></div>
+        <div class="field"><label for="s3">Model</label><select id="s3"><option>Timestral-209M</option></select></div>
+        <div class="field"><label for="s4">Interval</label><select id="s4"><option>80%</option></select></div>
+        <div style="display:flex;gap:8px;margin-top:20px"><button class="primary" type="button">Run forecast</button><button type="button">Export</button></div>
+      </div>
+      <div class="card">
+        <span class="kicker">Forecast · vendite · 90 days</span>
+        <svg class="chart" id="chart" viewBox="0 0 640 300" width="100%" role="img" aria-label="Sample forecast chart"></svg>
+        <table>
+          <tr><th>Month</th><th>Median</th><th>80% interval</th></tr>
+          <tr><td>December</td><td class="num">4 812</td><td class="num">4 120 – 5 530</td></tr>
+          <tr><td>January</td><td class="num">3 960</td><td class="num">3 210 – 4 780</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+  const colors = [
+    ["ink", "#141414"], ["graphite", "#4A463F"], ["stone", "#8A8375"], ["sand", "#C2BAAC"],
+    ["linen", "#D9D2C7"], ["paper", "#E3DED5"], ["ultramarine", "#2336BC"], ["ultramarine-500", "#3E4FC8"],
+    ["ultramarine-400", "#5464CC"], ["ultramarine-200", "#9AA5E4"], ["ultramarine-100", "#C9CFF2"], ["signal-red", "#BC2323"],
+  ];
+  document.getElementById("swatches").innerHTML = colors
+    .map(([n, h]) => `<div class="swatch"><div style="background:${h}"></div><p>${n}<br>${h}</p></div>`)
+    .join("");
+
+  // Sample forecast drawn with the chart tokens.
+  const svg = document.getElementById("chart");
+  const W = 640, H = 300, split = 400, base = 170;
+  const hist = [], fut = [];
+  for (let i = 0; i <= 80; i++) {
+    const t = i / 80;
+    hist.push([20 + t * (split - 20), base - 30 * t - 22 * Math.sin(t * Math.PI * 9) - 6 * Math.sin(t * Math.PI * 23)]);
+  }
+  const last = hist[hist.length - 1][1];
+  for (let i = 0; i <= 30; i++) {
+    const t = i / 30;
+    fut.push([split + t * (W - 20 - split), last - 14 * t - 18 * Math.sin(t * Math.PI * 3.4), t]);
+  }
+  const band = (k, v) => {
+    const up = fut.map(([x, y, t]) => `${x},${y - k * (10 + 46 * t)}`);
+    const lo = fut.slice().reverse().map(([x, y, t]) => `${x},${y + k * (10 + 46 * t)}`);
+    return `<polygon points="${up.concat(lo).join(" ")}" fill="var(${v})"/>`;
+  };
+  const line = (pts, v, w) => `<polyline points="${pts.map(p => p[0] + "," + p[1]).join(" ")}" fill="none" stroke="var(${v})" stroke-width="${w}" stroke-linejoin="round"/>`;
+  svg.innerHTML =
+    band(1.6, "--tm-chart-band-98") + band(1.2, "--tm-chart-band-90") + band(0.85, "--tm-chart-band-80") + band(0.4, "--tm-chart-band-50") +
+    line(hist, "--tm-chart-history", 2) + line(fut, "--tm-chart-median", 2.5) +
+    `<line x1="${split}" y1="20" x2="${split}" y2="280" stroke="var(--tm-text-muted)" stroke-dasharray="2 4"/>` +
+    `<text x="${split + 8}" y="34">NOW</text><text x="20" y="292">HISTORY</text><text x="${W - 20}" y="292" text-anchor="end">FORECAST</text>`;
+
+  // Light/dark switch: swap the hero source too, since <picture> follows the OS setting.
+  const root = document.documentElement, hero = document.querySelector("#hero img"), src = document.querySelector("#hero source");
+  document.getElementById("mode").onclick = () => {
+    const dark = !(root.dataset.theme === "dark" || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches));
+    root.dataset.theme = dark ? "dark" : "light";
+    src.srcset = hero.src = dark ? "assets/banner-dark.svg" : "assets/banner-light.svg";
+  };
+</script>
+</body>
+</html>

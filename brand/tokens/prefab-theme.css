@@ -1,0 +1,66 @@
+/* Timestral MCP theme for the Prefab MCP apps (Forecast Studio, upload panel, charts).
+   Reference copy: the apps use src/timestral_mcp/ui/theme.py, which also defines the
+   --tm-* chart variables. Keep the two in sync. */
+
+/* LIGHT */
+--background: #e3ded5;
+--foreground: #141414;
+--card: #ffffff;
+--card-foreground: #141414;
+--popover: #ffffff;
+--popover-foreground: #141414;
+--primary: #2336bc;
+--primary-foreground: #ffffff;
+--secondary: #d9d2c7;
+--secondary-foreground: #141414;
+--muted: #d9d2c7;
+--muted-foreground: #4a463f;
+--accent: #dde1f7;
+--accent-foreground: #2336bc;
+--destructive: #bc2323;
+--border: #c2baac;
+--input: #c2baac;
+--ring: #2336bc;
+--chart-1: #2336bc;
+--chart-2: #141414;
+--chart-3: #9aa5e4;
+--chart-4: #8a8375;
+--chart-5: #c9cff2;
+--radius: 0rem;
+--font-sans: Calibri, Carlito, "Segoe UI", Arial, sans-serif;
+--font-mono: "Courier New", Courier, "Liberation Mono", monospace;
+
+/* DARK */
+--background: #141414;
+--foreground: #e3ded5;
+--card: #1e1d1b;
+--card-foreground: #e3ded5;
+--popover: #282624;
+--popover-foreground: #e3ded5;
+--primary: #2336bc;
+--primary-foreground: #ffffff;
+--secondary: #282624;
+--secondary-foreground: #e3ded5;
+--muted: #282624;
+--muted-foreground: #c2baac;
+--accent: #222c78;
+--accent-foreground: #dde1f7;
+--destructive: #bc2323;
+--border: #4a463f;
+--input: #4a463f;
+--ring: #9aa5e4;
+--chart-1: #9aa5e4;
+--chart-2: #e3ded5;
+--chart-3: #5464cc;
+--chart-4: #8a8375;
+--chart-5: #2336bc;
+
+/* EXTRA (css=): headings in the display face, labels in mono caps */
+/*
+.pf-app-root h1, .pf-app-root h2, .pf-app-root h3 {
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; font-weight: 700; letter-spacing: -0.02em;
+}
+.pf-app-root label, .pf-app-root th {
+  font-family: "Courier New", Courier, monospace; text-transform: uppercase; letter-spacing: 0.18em; font-size: 11px;
+}
+*/

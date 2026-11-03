@@ -1,9 +1,21 @@
-# Timestral MCP
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brand/assets/banner-dark.svg">
+  <img alt="Timestral MCP — probabilistic forecasting MCP server" src="brand/assets/banner-light.svg" width="100%">
+</picture>
+
+<p>
+  <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-141414?style=flat-square&labelColor=4A463F">
+  <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-2336BC?style=flat-square&labelColor=141414">
+  <img alt="FastMCP 4" src="https://img.shields.io/badge/FastMCP-4-141414?style=flat-square&labelColor=4A463F">
+  <img alt="Timestral 5M–209M" src="https://img.shields.io/badge/Timestral-5M%20%E2%80%93%20209M-141414?style=flat-square&labelColor=4A463F">
+</p>
 
 An MCP server (built with FastMCP 4) that lets Claude use Mistral's **Timestral** models for
 probabilistic forecasting and time series analysis, with interactive charts in the chat.
 
-> Status: **Milestone 1 (local MVP)**. See [docs/design.md](docs/design.md) for the design and roadmap.
+> [!NOTE]
+> Status: **Milestone 1 (local MVP)**. See [docs/design.md](docs/design.md) for the design and roadmap,
+> and [brand/](brand/README.md) for the visual identity used by the docs and the MCP apps.
 
 ## Features
 - `load_dataset`: reads a local CSV/Excel file (or data pasted in the chat) and detects dates, frequency, series and value columns.
@@ -96,3 +108,17 @@ Layout: `src/timestral_mcp/{data,analytics,ui}` (data, computation, interfaces),
 - `forecast_many` has a time budget (`max_seconds`, default 90) and a series limit; series not run are listed so the call can be repeated with `series=[...]`.
 - Probabilities and totals over several periods are approximations from the marginal quantiles; the tools say so and return ranges where the exact value is not computable.
 - Long tools (`backtest`, `forecast_many`, `detect_anomalies`, `covariate_importance`) are MCP Tasks (`fastmcp[tasks]`, in-memory backend): clients on the modern protocol get a background task with progress and a 15-minute default budget; clients on the legacy protocol (e.g. Claude Desktop) get a synchronous call with a 90-second default budget and the tool reports what it did not run. The backend is in memory, so tasks do not survive a server restart (a Redis/Valkey backend is planned for the cloud milestone).
+
+## Visual identity
+The docs, the MCP apps (Forecast Studio, upload panel, charts) and the PNG charts share one visual system:
+warm neutrals, a single ultramarine accent, and a quantile fan drawn in pixels. Assets, tokens and rules are in
+[brand/](brand/README.md); the app theme lives in [`src/timestral_mcp/ui/theme.py`](src/timestral_mcp/ui/theme.py).
+
+---
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brand/assets/wordmark-dark.svg">
+  <img alt="timestral" src="brand/assets/wordmark-light.svg" width="260">
+</picture>
+
+<sub>Timestral is a family of models by Mistral AI. This project is independent and not affiliated with or endorsed by Mistral AI.</sub>
