@@ -54,7 +54,7 @@ async def test_end_to_end_flow(tmp_path):
         text = res.content[0].text
         assert "Mediana prevista" in text
         ui = json.dumps(res.structured_content, default=str)
-        assert "LineChart" in ui and "DataTable" in ui
+        assert "AreaChart" in ui and "DataTable" in ui
 
         fc_id = [w for w in text.split() if w.startswith("fc_")][0]
         det = (

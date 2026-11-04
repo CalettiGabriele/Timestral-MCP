@@ -151,7 +151,7 @@ async def test_studio_run_end_to_end_via_hidden_backend_tool():
             )
         ).structured_content
         assert out["forecast_id"].startswith("fc_") and len(out["table"]) == 30
-        assert {"storico", "mediana", "basso", "alto"} <= set(out["chart"][-1])
+        assert {"mediana", "banda", "banda50"} <= set(out["chart"][-1]) and "storico" in out["chart"][0]
         assert out["metrics"]["model"] == "Timestral-5M" and out["metrics"]["interval_label"].startswith(
             "Intervallo 90%"
         )

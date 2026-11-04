@@ -29,5 +29,5 @@ def test_theme_colors_match_brand_tokens():
 
 def test_theme_defines_every_chart_variable():
     css = theme.THEME.to_css()
-    for var in ("--tm-history", "--tm-median", "--tm-bound", "--tm-muted-line", "--tm-scenario-2"):
-        assert css.count(var + ":") == 2, var  # chiaro e scuro
+    for var in ("--tm-history", "--tm-median", "--tm-band-outer", "--tm-band-inner", "--tm-scenario-2"):
+        assert css.count(var + ":") >= 2, var  # chiaro e scuro

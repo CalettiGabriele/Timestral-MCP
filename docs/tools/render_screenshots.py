@@ -29,7 +29,7 @@ from timestral_mcp.server import mcp
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "docs" / "images"
 EXAMPLE = ROOT / "examples" / "vendite_esempio.csv"
-PAPER = (0xE3, 0xDE, 0xD5)
+PAPER = (0xFF, 0xFF, 0xFF)
 WIDTH = 1100
 
 CHROME_CANDIDATES = [
@@ -175,7 +175,7 @@ def screenshot(chrome: str, html: str, height: int) -> Image.Image:
 def trim(img: Image.Image, pad: int = 28) -> Image.Image:
     """Crop the empty paper below and around the app."""
     arr = np.asarray(img).astype(int)
-    diff = np.abs(arr - np.array(PAPER)).sum(axis=2) > 24
+    diff = np.abs(arr - arr[-1, -1]).sum(axis=2) > 24  # sfondo = colore dell'angolo in basso a destra
     rows, cols = np.where(diff.any(axis=1))[0], np.where(diff.any(axis=0))[0]
     if not len(rows):
         return img

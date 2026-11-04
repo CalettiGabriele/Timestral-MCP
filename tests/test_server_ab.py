@@ -68,7 +68,7 @@ async def test_forecast_many_flow_and_batch_ids(tmp_path):
         assert "DataTable" in ui and "BarChart" in ui
         batch_id = next(w for w in text.split() if w.startswith("bm_"))
         one = await c.call_tool("batch_series_forecast", {"batch_id": batch_id, "series": "B"})
-        assert "serie 'B'" in one.content[0].text and "LineChart" in json.dumps(
+        assert "serie 'B'" in one.content[0].text and "AreaChart" in json.dumps(
             one.structured_content, default=str
         )
         det = (

@@ -28,14 +28,10 @@ from prefab_ui.components import (
     AlertDescription,
     Badge,
     Button,
-    Card,
-    CardContent,
-    CardHeader,
     Column,
     DataTable,
     DataTableColumn,
     DropZone,
-    Heading,
     Input,
     Label,
     Loader,
@@ -49,7 +45,6 @@ from prefab_ui.components import (
     Tabs,
     Text,
 )
-from prefab_ui.components.charts import ChartSeries, LineChart
 from prefab_ui.components.control_flow import ForEach, If
 from prefab_ui.rx import ERROR, RESULT, STATE, Rx
 
@@ -58,18 +53,14 @@ from timestral_mcp.analytics import backtest as bt
 from timestral_mcp.analytics.covariates import future_block
 from timestral_mcp.analytics.forecast import run_forecast
 from timestral_mcp.analytics.summary import (
-    _date,
-    _pct,
     backtest_summary,
-    fmt,
     forecast_summary,
-    known_covariate_lines,
 )
 from timestral_mcp.config import MODEL_SIZES, MODEL_WEIGHTS_MB
 from timestral_mcp.data.ingest import Dataset, build_dataset, read_bytes
 from timestral_mcp.session import backtests, datasets, forecasts, settings, uploads
-from timestral_mcp.ui.charts import forecast_rows
-from timestral_mcp.ui.theme import C_BOUND, C_HISTORY, C_MEDIAN, THEME
+from timestral_mcp.ui import kit
+from timestral_mcp.ui.charts import covariate_sentences, forecast_rows, forecast_table
 
 studio = FastMCPApp("Forecast Studio")
 uploader = FastMCPApp("Dataset Upload")
@@ -236,37 +227,33 @@ async def studio_run(
     warnings = list(result.warnings)
     if dropped:
         warnings.append(f"'{target}' è il target: l'ho tolto dalle covariate.")
-    cov_lines = known_covariate_lines(result)
     message = (
         f"Forecast Studio: ho calcolato la previsione {result.id} (serie '{result.series}', target '{target}', "
         f"{result.horizon} periodi, Timestral-{result.model}). Usa get_forecast_details con forecast_id='{result.id}' "
         f"per rispondere alle mie domande.\n\n{forecast_summary(result)}"
         + (f"\n\n{backtest_text}" if backtest_text else "")
     )
+    _, table = forecast_table(result)
+    end = result.future_index[-1]
     return {
         "forecast_id": result.id,
         "metrics": {
-            "last": fmt(last_val),
-            "median_end": fmt(med[-1]),
-            "change": _pct(med[-1], last_val),
-            "interval_end": f"{fmt(lo[-1])} – {fmt(hi[-1])}",
-            "interval_label": f"Intervallo {result.interval:.0%} a fine orizzonte",
-            "peak": fmt(med[peak]),
-            "peak_date": _date(result.future_index[peak], result.freq),
+            "last": kit.num(last_val),
+            "last_date": kit.day(result.history.last_valid_index(), result.freq),
+            "end_label": f"Previsto al {kit.day(end, result.freq, year=False)}",
+            "median_end": kit.num(med[-1]),
+            "change": f"{kit.signed_pct(100 * (med[-1] / last_val - 1)) if last_val else 'n/d'} sull'ultimo valore",
+            "interval_end": f"{kit.num(lo[-1])} – {kit.num(hi[-1])}",
+            "interval_label": f"Intervallo {result.interval:.0%}",
+            "interval_desc": f"in {kit.in_cases(result.interval)}",
+            "peak": kit.num(med[peak]),
+            "peak_date": kit.day(result.future_index[peak], result.freq),
             "model": f"Timestral-{result.model}",
         },
         "chart": forecast_rows(result),
-        "table": [
-            {
-                "data": _date(ts, result.freq),
-                "mediana": round(float(med[i]), 2),
-                "basso": round(float(lo[i]), 2),
-                "alto": round(float(hi[i]), 2),
-            }
-            for i, ts in enumerate(result.future_index)
-        ],
+        "table": table,
         "warnings_text": "\n".join(warnings),
-        "covariate_text": "\n".join(cov_lines),
+        "covariate_text": "\n".join(covariate_sentences(result)),
         "backtest_text": backtest_text,
         "backtest_metrics": backtest_metrics,
         "message": message,
@@ -329,7 +316,7 @@ def forecast_studio(dataset_id: str | None = None, series: str | None = None) ->
     series_keys = list(ds.series)[:MAX_SERIES_OPTIONS]
     horizon = default_horizon(ds.freq)
     df = ds.series[key]
-    period = f"{df.index.min():%Y-%m-%d} → {df.index.max():%Y-%m-%d}"
+    period = kit.span(df.index.min(), df.index.max(), ds.freq)
 
     state: dict[str, Any] = {
         "dataset_id": dataset_id,
@@ -346,14 +333,20 @@ def forecast_studio(dataset_id: str | None = None, series: str | None = None) ->
         "chart": [],
         "table": [],
         "metrics": {
-            "last": "",
-            "median_end": "",
-            "change": "",
-            "interval_end": "",
-            "interval_label": "",
-            "peak": "",
-            "peak_date": "",
-            "model": "",
+            k: ""
+            for k in (
+                "last",
+                "last_date",
+                "end_label",
+                "median_end",
+                "change",
+                "interval_end",
+                "interval_label",
+                "interval_desc",
+                "peak",
+                "peak_date",
+                "model",
+            )
         },
         "message": "",
         "forecast_id": "",
@@ -376,171 +369,172 @@ def forecast_studio(dataset_id: str | None = None, series: str | None = None) ->
         "allow_download": Rx("allow_download"),
     }
 
-    with Card(css_class="max-w-4xl mx-auto") as view:
-        with CardHeader(), Column(gap=1):
-            Heading("Forecast Studio")
-            Text(
-                f"Dataset '{ds.name}' · {len(ds.series)} serie · frequenza {ds.freq_label} · {period}",
-                css_class="text-sm text-muted-foreground",
-            )
-        with CardContent(), Column(gap=4):
-            for warning in ds.warnings:
-                with Alert(variant="warning"):
-                    AlertDescription(warning)
-            with Row(gap=4, css_class="flex-wrap"):
-                if len(series_keys) > 1:
-                    with Column(gap=1):
-                        Label("Serie")
-                        with Select(name="series"):
-                            for k in series_keys:
-                                SelectOption(value=k, label=k)
-                        if len(ds.series) > len(series_keys):
-                            Text(
-                                f"Mostrate le prime {len(series_keys)} serie su {len(ds.series)}.",
-                                css_class="text-xs text-muted-foreground",
-                            )
+    with (
+        kit.page(
+            "Forecast Studio",
+            f"Previsione su «{ds.name}»",
+            f"{len(ds.series)} serie · frequenza {ds.freq_label} · {period}. "
+            "Scegli cosa prevedere e premi «Calcola previsione».",
+        ) as view,
+        Column(gap=5),
+    ):
+        for warning in ds.warnings:
+            with Alert(variant="warning"):
+                AlertDescription(warning)
+        with Row(gap=4, css_class="flex-wrap"):
+            if len(series_keys) > 1:
                 with Column(gap=1):
-                    Label("Colonna da prevedere")
-                    with Select(name="target"):
-                        for c in ds.value_columns:
-                            SelectOption(value=c, label=c)
-                with Column(gap=1):
-                    Label(f"Orizzonte (periodi: {ds.freq_label})")
-                    Input(name="horizon", input_type="number", min=1, max=3660, step=1)
-            with Row(gap=4, css_class="flex-wrap"):
-                with Column(gap=1):
-                    Label("Modello")
-                    with Select(name="model"):
-                        for value, label in model_options:
-                            SelectOption(value=value, label=label)
-                with Column(gap=1):
-                    Label("Intervallo di incertezza")
-                    with Select(name="interval"):
-                        for value, label in INTERVALS:
-                            SelectOption(value=value, label=label)
-            if cov_cols:
-                Separator()
-                Heading("Covariate", css_class="text-base")
-                Text(
-                    "Colonne che possono aiutare la previsione. «Nota in anticipo» richiede righe future nel dataset "
-                    "(es. promozioni pianificate); sono preselezionate quelle che le hanno.",
-                    css_class="text-xs text-muted-foreground",
-                )
-                for i, c in enumerate(cov_cols):
-                    with Row(gap=3, align="center"):
-                        Text(c, css_class="w-48 text-sm font-medium")
-                        with Select(name=f"cov_{i}"):
-                            for value, label in COVARIATE_MODES:
-                                SelectOption(value=value, label=label)
-                if skipped:
-                    Text(f"Non mostrate: {', '.join(skipped)}.", css_class="text-xs text-muted-foreground")
+                    Label("Serie")
+                    with Select(name="series"):
+                        for k in series_keys:
+                            SelectOption(value=k, label=k)
+                    if len(ds.series) > len(series_keys):
+                        Text(
+                            f"Mostrate le prime {len(series_keys)} serie su {len(ds.series)}.",
+                            css_class="text-xs text-muted-foreground",
+                        )
+            with Column(gap=1):
+                Label("Colonna da prevedere")
+                with Select(name="target"):
+                    for c in ds.value_columns:
+                        SelectOption(value=c, label=c)
+            with Column(gap=1):
+                Label(f"Quanti {kit.period_word(ds.freq, 2)} prevedere")
+                Input(name="horizon", input_type="number", min=1, max=3660, step=1)
+        with Row(gap=4, css_class="flex-wrap"):
+            with Column(gap=1):
+                Label("Modello")
+                with Select(name="model"):
+                    for value, label in model_options:
+                        SelectOption(value=value, label=label)
+            with Column(gap=1):
+                Label("Intervallo di incertezza")
+                with Select(name="interval"):
+                    for value, label in INTERVALS:
+                        SelectOption(value=value, label=label)
+        if cov_cols:
             Separator()
-            with Row(gap=6, css_class="flex-wrap"):
-                Switch(name="with_backtest", label="Esegui anche il backtest (più lento)")
-                Switch(name="allow_download", label="Consenti il download del modello se manca")
-            with Row(gap=3, align="center"):
-                Button(
-                    "Calcola previsione",
-                    disabled=Rx("running"),
-                    on_click=[
-                        SetState("running", True),
-                        SetState("error", ""),
-                        SetState("ready", False),
-                        CallTool(
-                            studio_run,
-                            arguments=arguments,
-                            on_success=[
-                                SetState("chart", RESULT.chart),
-                                SetState("table", RESULT.table),
-                                SetState("metrics", RESULT.metrics),
-                                SetState("message", RESULT.message),
-                                SetState("forecast_id", RESULT.forecast_id),
-                                SetState("warnings_text", RESULT.warnings_text),
-                                SetState("covariate_text", RESULT.covariate_text),
-                                SetState("backtest_text", RESULT.backtest_text),
-                                SetState("ready", True),
-                                SetState("running", False),
-                            ],
-                            on_error=[SetState("error", ERROR), SetState("running", False)],
-                        ),
-                    ],
-                )
-                with If(Rx("running")):
-                    Loader(variant="spin")
-                    Text("Calcolo in corso…", css_class="text-sm text-muted-foreground")
-            with If(Rx("error")):
-                with Alert(variant="destructive"):
-                    AlertDescription(Rx("error"))
+            kit.label("Altre colonne da usare")
+            kit.note(
+                "Colonne che possono aiutare la previsione, come promozioni o prezzi. «Nota in anticipo» vale "
+                "per ciò che conosci già nel futuro (servono righe future nel file); sono preselezionate quelle "
+                "che le hanno."
+            )
+            for i, c in enumerate(cov_cols):
+                with Row(gap=3, align="center"):
+                    Text(c, css_class="w-48 text-sm font-medium")
+                    with Select(name=f"cov_{i}"):
+                        for value, label in COVARIATE_MODES:
+                            SelectOption(value=value, label=label)
+            if skipped:
+                Text(f"Non mostrate: {', '.join(skipped)}.", css_class="text-xs text-muted-foreground")
+        Separator()
+        with Row(gap=6, css_class="flex-wrap"):
+            Switch(name="with_backtest", label="Esegui anche il backtest (più lento)")
+            Switch(name="allow_download", label="Consenti il download del modello se manca")
+        with Row(gap=3, align="center"):
+            Button(
+                "Calcola previsione",
+                disabled=Rx("running"),
+                on_click=[
+                    SetState("running", True),
+                    SetState("error", ""),
+                    SetState("ready", False),
+                    CallTool(
+                        studio_run,
+                        arguments=arguments,
+                        on_success=[
+                            SetState("chart", RESULT.chart),
+                            SetState("table", RESULT.table),
+                            SetState("metrics", RESULT.metrics),
+                            SetState("message", RESULT.message),
+                            SetState("forecast_id", RESULT.forecast_id),
+                            SetState("warnings_text", RESULT.warnings_text),
+                            SetState("covariate_text", RESULT.covariate_text),
+                            SetState("backtest_text", RESULT.backtest_text),
+                            SetState("ready", True),
+                            SetState("running", False),
+                        ],
+                        on_error=[SetState("error", ERROR), SetState("running", False)],
+                    ),
+                ],
+            )
+            with If(Rx("running")):
+                Loader(variant="spin")
+                Text("Calcolo in corso…", css_class="text-sm text-muted-foreground")
+        with If(Rx("error")):
+            with Alert(variant="destructive"):
+                AlertDescription(Rx("error"))
 
-            with If(Rx("ready")), Column(gap=4):
-                Separator()
-                with If(Rx("warnings_text")):
-                    with Alert(variant="warning"):
-                        AlertDescription(Rx("warnings_text"))
-                with If(Rx("covariate_text")):
-                    Text(Rx("covariate_text"), css_class="text-sm text-muted-foreground whitespace-pre-wrap")
-                with Row(gap=3, css_class="flex-wrap"):
-                    Metric(label="Ultimo osservato", value=Rx("metrics.last"))
-                    Metric(
-                        label="Mediana a fine orizzonte",
-                        value=Rx("metrics.median_end"),
-                        delta=Rx("metrics.change"),
+        with If(Rx("ready")), Column(gap=4):
+            Separator()
+            with If(Rx("warnings_text")):
+                with Alert(variant="warning"):
+                    AlertDescription(Rx("warnings_text"))
+            with If(Rx("covariate_text")), Column(gap=1, css_class="tm-panel"):
+                kit.label("Già incluso nella previsione")
+                Text(Rx("covariate_text"), css_class="whitespace-pre-wrap")
+            with Row(gap=6, css_class="flex-wrap"):
+                Metric(label="Ultimo valore", value=Rx("metrics.last"), description=Rx("metrics.last_date"))
+                Metric(
+                    label=Rx("metrics.end_label"),
+                    value=Rx("metrics.median_end"),
+                    description=Rx("metrics.change"),
+                )
+                Metric(
+                    label="Intervallo probabile",
+                    value=Rx("metrics.interval_end"),
+                    description=Rx("metrics.interval_desc"),
+                )
+                Metric(label="Picco previsto", value=Rx("metrics.peak"), description=Rx("metrics.peak_date"))
+            with Tabs(value="grafico", variant="line"):
+                with Tab("Grafico", value="grafico"), Column(gap=3):
+                    kit.band_chart(
+                        Rx("chart"),
+                        actual_key="storico",
+                        actual_label="Storico",
+                        median_label="Previsione",
+                        outer_label="Intervallo scelto",
+                        inner_label="Intervallo 50%",
+                        height=380,
                     )
-                    Metric(label=Rx("metrics.interval_label"), value=Rx("metrics.interval_end"))
-                    Metric(
-                        label="Picco previsto", value=Rx("metrics.peak"), description=Rx("metrics.peak_date")
+                    kit.note(
+                        "La linea blu è il valore più probabile; le aree colorate mostrano quanto potrebbe "
+                        "discostarsene il valore reale. Più ci si allontana nel tempo, più si allargano."
                     )
-                with Tabs(value="grafico", variant="line"):
-                    with Tab("Grafico", value="grafico"):
-                        LineChart(
-                            data=Rx("chart"),
-                            series=[
-                                ChartSeries(data_key="storico", label="Storico", color=C_HISTORY),
-                                ChartSeries(data_key="mediana", label="Previsione (mediana)", color=C_MEDIAN),
-                                ChartSeries(data_key="basso", label="Limite basso", color=C_BOUND),
-                                ChartSeries(data_key="alto", label="Limite alto", color=C_BOUND),
-                            ],
-                            x_axis="date",
-                            height=380,
-                            show_dots=False,
-                            animate=False,
+                with Tab("Tabella", value="tabella"):
+                    DataTable(
+                        columns=[
+                            DataTableColumn(key="data", header="Data"),
+                            DataTableColumn(key="mediana", header="Previsione", align="right"),
+                            DataTableColumn(key="basso", header="Minimo probabile", align="right"),
+                            DataTableColumn(key="alto", header="Massimo probabile", align="right"),
+                        ],
+                        rows=Rx("table"),
+                        paginated=True,
+                        page_size=10,
+                    )
+                with Tab("Backtest", value="backtest"):
+                    with If(Rx("backtest_text")):
+                        Text(Rx("backtest_text"), css_class="text-sm whitespace-pre-wrap")
+                    with If(~Rx("backtest_text")):
+                        Text(
+                            "Attiva «Esegui anche il backtest» e ricalcola per vedere quanto fidarsi.",
+                            css_class="text-sm text-muted-foreground",
                         )
-                    with Tab("Tabella", value="tabella"):
-                        DataTable(
-                            columns=[
-                                DataTableColumn(key="data", header="Data", sortable=True),
-                                DataTableColumn(key="mediana", header="Mediana", sortable=True),
-                                DataTableColumn(key="basso", header="Limite basso", sortable=True),
-                                DataTableColumn(key="alto", header="Limite alto", sortable=True),
-                            ],
-                            rows=Rx("table"),
-                            search=True,
-                            paginated=True,
-                            page_size=12,
-                        )
-                    with Tab("Backtest", value="backtest"):
-                        with If(Rx("backtest_text")):
-                            Text(Rx("backtest_text"), css_class="text-sm whitespace-pre-wrap")
-                        with If(~Rx("backtest_text")):
-                            Text(
-                                "Attiva «Esegui anche il backtest» e ricalcola per vedere quanto fidarsi.",
-                                css_class="text-sm text-muted-foreground",
-                            )
-                with Row(gap=3, css_class="flex-wrap"):
-                    Button(
-                        "Invia i risultati a Claude", variant="default", on_click=SendMessage(Rx("message"))
-                    )
-                    Button(
-                        "Salva in Excel",
-                        variant="outline",
-                        on_click=CallTool(
-                            studio_export,
-                            arguments={"forecast_id": Rx("forecast_id"), "format": "xlsx"},
-                            on_success=ShowToast(f"Salvato: {RESULT.path}", variant="success"),
-                            on_error=ShowToast(ERROR, variant="error"),
-                        ),
-                    )
-    return PrefabApp(theme=THEME, title="Forecast Studio", view=view, state=state)
+            with Row(gap=3, css_class="flex-wrap"):
+                Button("Invia i risultati a Claude", variant="default", on_click=SendMessage(Rx("message")))
+                Button(
+                    "Salva in Excel",
+                    variant="outline",
+                    on_click=CallTool(
+                        studio_export,
+                        arguments={"forecast_id": Rx("forecast_id"), "format": "xlsx"},
+                        on_success=ShowToast(f"Salvato: {RESULT.path}", variant="success"),
+                        on_error=ShowToast(ERROR, variant="error"),
+                    ),
+                )
+    return kit.app(view, "Forecast Studio", state)
 
 
 # ----------------------------------------------------------------------------- caricamento file dall'interfaccia
@@ -606,55 +600,55 @@ async def store_upload(files: list[dict[str, Any]]) -> dict[str, Any]:
     ),
 )
 def upload_dataset() -> PrefabApp:
-    with Card(css_class="max-w-2xl mx-auto") as view:
-        with CardHeader():
-            Heading("Carica i tuoi dati")
-        with CardContent(), Column(gap=4):
-            Text(
-                "Trascina qui file CSV o Excel: diventano dataset pronti per la previsione, senza passare dalla chat.",
-                css_class="text-sm text-muted-foreground",
+    with (
+        kit.page(
+            "Carica dati",
+            "Carica i tuoi dati",
+            "Trascina qui file CSV o Excel: diventano dataset pronti per la previsione, senza passare dalla chat.",
+        ) as view,
+        Column(gap=4),
+    ):
+        DropZone(
+            name="pending",
+            icon="inbox",
+            label="Trascina qui i file",
+            description=f"CSV, TSV, TXT, Excel (.xlsx) · fino a {settings.max_upload_mb} MB",
+            accept=UPLOAD_SUFFIXES,
+            multiple=True,
+            max_size=settings.max_upload_mb * 1024 * 1024,
+        )
+        with If(STATE.pending.length()), Column(gap=2):
+            with ForEach("pending"), Row(gap=2, align="center"):
+                Text(Rx("$item.name"), css_class="text-sm")
+            Button(
+                "Carica",
+                on_click=CallTool(
+                    store_upload,
+                    arguments={"files": Rx("pending")},
+                    on_success=[
+                        SetState("stored", RESULT.items),
+                        SetState("pending", []),
+                        UpdateContext(content=RESULT.message),
+                        ShowToast("File elaborati.", variant="success"),
+                    ],
+                    on_error=ShowToast(ERROR, variant="error"),
+                ),
             )
-            DropZone(
-                name="pending",
-                icon="inbox",
-                label="Trascina qui i file",
-                description=f"CSV, TSV, TXT, Excel (.xlsx) · fino a {settings.max_upload_mb} MB",
-                accept=UPLOAD_SUFFIXES,
-                multiple=True,
-                max_size=settings.max_upload_mb * 1024 * 1024,
-            )
-            with If(STATE.pending.length()), Column(gap=2):
-                with ForEach("pending"), Row(gap=2, align="center"):
-                    Text(Rx("$item.name"), css_class="text-sm")
-                Button(
-                    "Carica",
-                    on_click=CallTool(
-                        store_upload,
-                        arguments={"files": Rx("pending")},
-                        on_success=[
-                            SetState("stored", RESULT.items),
-                            SetState("pending", []),
-                            UpdateContext(content=RESULT.message),
-                            ShowToast("File elaborati.", variant="success"),
-                        ],
-                        on_error=ShowToast(ERROR, variant="error"),
-                    ),
-                )
-            with If(STATE.stored.length()):
-                Separator()
-                with ForEach("stored") as f, Column(gap=1):
-                    with Row(gap=2, align="center"):
-                        Text(f.name, css_class="text-sm font-medium")
-                        with If(f.ok):
-                            Badge("pronto", variant="success")
-                        with If(~f.ok):
-                            Badge("da verificare", variant="warning")
-                    Text(f.info, css_class="text-xs text-muted-foreground")
+        with If(STATE.stored.length()):
+            Separator()
+            with ForEach("stored") as f, Column(gap=1):
+                with Row(gap=2, align="center"):
+                    Text(f.name, css_class="text-sm font-medium")
                     with If(f.ok):
-                        Button(
-                            "Apri nel Forecast Studio",
-                            variant="outline",
-                            size="sm",
-                            on_click=SendMessage(f"Apri il Forecast Studio sul dataset {f.dataset_id}"),
-                        )
-    return PrefabApp(theme=THEME, title="Carica dati", view=view, state={"pending": [], "stored": []})
+                        Badge("pronto", variant="success")
+                    with If(~f.ok):
+                        Badge("da verificare", variant="warning")
+                Text(f.info, css_class="text-xs text-muted-foreground")
+                with If(f.ok):
+                    Button(
+                        "Apri nel Forecast Studio",
+                        variant="outline",
+                        size="sm",
+                        on_click=SendMessage(f"Apri il Forecast Studio sul dataset {f.dataset_id}"),
+                    )
+    return kit.app(view, "Carica dati", {"pending": [], "stored": []})

@@ -255,7 +255,7 @@ flowchart LR
 <summary><b>Details</b></summary>
 
 - **Data sources:** local file path, uploaded file or pasted text. URLs and cloud buckets are planned.
-- **Interactive charts** draw the interval limits as lines; the filled band is in the PNG (`forecast_chart_image`).
+- **Theme:** the MCP apps open in the light theme and have a button to switch to dark at any time; they do not follow the client theme.
 - **MCP apps** (Forecast Studio, upload panel, charts) need a client that renders them (Claude Desktop, claude.ai, ChatGPT,
   VS Code…). Other clients get the same results as text. Rendering has not been checked visually in every client.
 - **Calendar features** work on daily or finer data only; seasonal sales and paydays must be added to the file as 0/1 columns.
